@@ -203,6 +203,7 @@ export function createBot(token = config.botToken): Telegraf<Context> | null {
 // Bot instance manager with auto-recovery and single-instance locking
 let runningBotInstance: Telegraf<Context> | null = null;
 let isBotRunning = false;
+let isBotStarting = false;
 let expiryCheckInterval: NodeJS.Timeout | null = null;
 let reconnectTimer: NodeJS.Timeout | null = null;
 let lastBotError: string | null = null;
@@ -215,6 +216,10 @@ export async function startTelegramBot(token = config.botToken): Promise<{ succe
     return { success: true, message: 'Bot is already running and active.' };
   }
 
+  if (isBotStarting) {
+    return { success: true, message: 'Bot launch is already in progress...' };
+  }
+
   if (!token || !token.includes(':')) {
     lastBotError = 'Cannot start bot: BOT_TOKEN is missing or not configured.';
     return {
@@ -223,58 +228,78 @@ export async function startTelegramBot(token = config.botToken): Promise<{ succe
     };
   }
 
+  isBotStarting = true;
+
   try {
+    // Stop any dangling prior instance before starting a fresh polling session
+    if (runningBotInstance) {
+      try {
+        runningBotInstance.stop('RESTART');
+      } catch (e) {
+        // Safe catch
+      }
+      runningBotInstance = null;
+    }
+
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+
     const bot = createBot(token);
     if (!bot) {
+      isBotStarting = false;
       lastBotError = 'Failed to create bot instance.';
       return { success: false, message: 'Failed to create bot instance.' };
     }
 
-    // Pre-flight credentials verification with Telegram API getMe()
-    // This cleanly checks for 401 Unauthorized before launching polling
-    try {
-      const me = await bot.telegram.getMe();
-      botUsername = me.username || null;
-      lastBotError = null;
-      console.log(`🤖 [Telegram Bot] Verified credentials for @${me.username || 'bot'} (${me.first_name || 'Course Bazar'})`);
-    } catch (authErr: any) {
-      const errorMsg = authErr?.message || String(authErr);
-      const is401 = authErr?.response?.error_code === 401 || errorMsg.includes('401') || errorMsg.toLowerCase().includes('unauthorized');
+    // 1. Pre-flight credentials verification with Telegram API getMe()
+    const me = await bot.telegram.getMe();
+    botUsername = me.username || null;
+    lastBotError = null;
+    console.log(`🤖 [Telegram Bot] Verified credentials for @${me.username || 'bot'} (${me.first_name || 'Course Bazar'})`);
 
-      if (is401) {
-        lastBotError = '401: Unauthorized (Invalid or expired Telegram BOT_TOKEN)';
-        console.warn('⚠️ [Telegram Bot] Token authorization check: 401 Unauthorized. Bot polling disabled; interactive Bot Simulator is active.');
-        if (reconnectTimer) {
-          clearTimeout(reconnectTimer);
-          reconnectTimer = null;
-        }
-        return {
-          success: false,
-          message: '401 Unauthorized: Telegram BOT_TOKEN is invalid or expired. Check token from @BotFather. You can continue using the Bot Simulator.'
-        };
-      }
-      console.warn('⚠️ [Telegram Bot] Pre-flight check notice:', errorMsg);
+    // 2. Clear any active webhooks and drop stale pending updates to avoid 409 conflicts
+    try {
+      await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+    } catch (whErr: any) {
+      console.warn('ℹ️ [Telegram Bot] deleteWebhook check notice:', whErr?.message || whErr);
     }
 
+    // 3. Mark bot as active and store instance
     runningBotInstance = bot;
-
-    // Launch with resilient parameters
-    await bot.launch({
-      dropPendingUpdates: false,
-      allowedUpdates: ['message', 'callback_query']
-    });
-
     isBotRunning = true;
+    isBotStarting = false;
     lastBotError = null;
     retryCount = 0;
-    console.log('🚀 [Bot] Course Bazar Telegram bot launched and actively listening for updates!');
 
-    // Clean up any existing interval before creating a new one
+    // 4. Launch polling in the background without blocking the HTTP request handler
+    bot.launch({
+      dropPendingUpdates: true,
+      allowedUpdates: ['message', 'callback_query']
+    }).then(() => {
+      console.log('🛑 [Bot] Telegram polling loop finished.');
+      if (runningBotInstance === bot) {
+        isBotRunning = false;
+        runningBotInstance = null;
+      }
+    }).catch((pollErr: any) => {
+      const errorMsg = pollErr?.message || String(pollErr);
+      console.warn('⚠️ [Telegram Bot Polling Error]:', errorMsg);
+      if (runningBotInstance === bot) {
+        isBotRunning = false;
+        runningBotInstance = null;
+        lastBotError = errorMsg;
+      }
+    });
+
+    console.log(`🚀 [Bot] Course Bazar Telegram bot (@${botUsername || 'bot'}) launched and actively listening!`);
+
+    // 5. Clean up any existing expiry interval before creating a new one
     if (expiryCheckInterval) {
       clearInterval(expiryCheckInterval);
     }
 
-    // Single managed interval for payment expiry check
     expiryCheckInterval = setInterval(async () => {
       try {
         const expired = await googleSheetsService.checkExpiredPurchases();
@@ -287,22 +312,19 @@ export async function startTelegramBot(token = config.botToken): Promise<{ succe
     }, 30 * 60 * 1000); // Check every 30 minutes
     if (expiryCheckInterval.unref) expiryCheckInterval.unref();
 
-    return { success: true, message: 'Bot started successfully!' };
+    return { success: true, message: `Bot @${botUsername || 'bot'} started successfully!` };
   } catch (error: any) {
+    isBotStarting = false;
+    isBotRunning = false;
+    runningBotInstance = null;
+
     const errorMsg = error?.message || String(error);
     const is401 = error?.response?.error_code === 401 || errorMsg.includes('401') || errorMsg.toLowerCase().includes('unauthorized');
     const is409 = error?.response?.error_code === 409 || errorMsg.includes('409') || errorMsg.toLowerCase().includes('conflict');
 
-    isBotRunning = false;
-    runningBotInstance = null;
-
     if (is401) {
       lastBotError = '401: Unauthorized (Invalid or expired Telegram BOT_TOKEN)';
       console.warn('⚠️ [Telegram Bot Launch]: 401 Unauthorized. The provided BOT_TOKEN is invalid or revoked. Polling paused.');
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-      }
       return {
         success: false,
         message: '401 Unauthorized: Telegram BOT_TOKEN is invalid or expired. Please check your token from @BotFather.'
@@ -312,10 +334,6 @@ export async function startTelegramBot(token = config.botToken): Promise<{ succe
     if (is409) {
       lastBotError = '409 Conflict: Another bot instance is already polling with this token.';
       console.warn('⚠️ [Telegram Bot Launch]: 409 Conflict. Another instance is active.');
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-      }
       return {
         success: false,
         message: 'Conflict: Another bot instance is already polling with this BOT_TOKEN. Make sure only one process is active.'
@@ -325,7 +343,7 @@ export async function startTelegramBot(token = config.botToken): Promise<{ succe
     lastBotError = errorMsg;
     console.warn('⚠️ [Telegram Bot Launch Notice]:', errorMsg);
 
-    // Schedule safe retry ONLY for transient network disconnects (max 3 retries, exponential backoff)
+    // Schedule safe retry ONLY for transient network disconnects
     const isTransientNetworkError =
       errorMsg.includes('ETIMEDOUT') ||
       errorMsg.includes('ECONNRESET') ||
@@ -352,19 +370,22 @@ export function stopTelegramBot(): { success: boolean; message: string } {
     reconnectTimer = null;
   }
   retryCount = 0;
+  isBotStarting = false;
 
-  if (!isBotRunning || !runningBotInstance) {
+  if (expiryCheckInterval) {
+    clearInterval(expiryCheckInterval);
+    expiryCheckInterval = null;
+  }
+
+  if (!isBotRunning && !runningBotInstance) {
     return { success: true, message: 'Bot is not currently running.' };
   }
 
   try {
-    if (expiryCheckInterval) {
-      clearInterval(expiryCheckInterval);
-      expiryCheckInterval = null;
+    if (runningBotInstance) {
+      runningBotInstance.stop('USER_STOP');
+      runningBotInstance = null;
     }
-
-    runningBotInstance.stop('USER_STOP');
-    runningBotInstance = null;
     isBotRunning = false;
     console.log('🛑 [Bot] Telegram bot stopped cleanly.');
     return { success: true, message: 'Bot stopped successfully.' };

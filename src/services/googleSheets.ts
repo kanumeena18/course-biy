@@ -3,83 +3,8 @@ import { google, sheets_v4 } from 'googleapis';
 import { config } from '../config/config.js';
 import { Course, Purchase, AdminUser, SettingItem, PurchaseStatus } from '../types/index.js';
 
-// Default initial courses matching the user prompt
-const DEFAULT_COURSES: Course[] = [
-  {
-    courseId: 'C001',
-    courseName: 'Storytelling Mastery',
-    creatorName: 'Zakir Khan',
-    price: 99,
-    originalPrice: 499,
-    courseSize: '2.46 GB',
-    language: 'Hindi',
-    driveLink: 'https://drive.google.com/drive/folders/sample-storytelling-course-link',
-    zipPassword: 'ZAKIR_STORY_PASS_2026',
-    description: 'Complete storytelling masterclass: Learn how to craft narratives, hook listeners, build emotional resonance, and master delivery.',
-    thumbnailUrl: 'https://images.unsplash.com/photo-1478737270239-2f02b77fc618?w=800&auto=format&fit=crop&q=80',
-    status: 'Active',
-    createdAt: '2026-10-07'
-  },
-  {
-    courseId: 'C002',
-    courseName: 'YouTube 101 - Workshop',
-    creatorName: 'KK Create',
-    price: 149,
-    originalPrice: 599,
-    courseSize: '3.50 GB',
-    language: 'Hindi',
-    driveLink: 'https://drive.google.com/drive/folders/sample-youtube-101-workshop-link',
-    zipPassword: 'YT_CREATOR_KEY_998',
-    description: 'Step-by-step YouTube workshop covering niche selection, thumbnail psychology, video editing flow, and audience growth hacks.',
-    thumbnailUrl: 'https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=800&auto=format&fit=crop&q=80',
-    status: 'Active',
-    createdAt: '2026-10-07'
-  },
-  {
-    courseId: 'C003',
-    courseName: 'Content Creators Cheat Codes',
-    creatorName: 'Aman Dhillon',
-    price: 199,
-    originalPrice: 799,
-    courseSize: '4.80 GB',
-    language: 'Hindi + English',
-    driveLink: 'https://drive.google.com/drive/folders/sample-creators-cheat-codes-link',
-    zipPassword: 'CHEAT_CODE_SECRET_77',
-    description: 'Viral short-form video scripting, lighting setup on a budget, audio mixing, and monetization systems for creators.',
-    thumbnailUrl: 'https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?w=800&auto=format&fit=crop&q=80',
-    status: 'Active',
-    createdAt: '2026-10-07'
-  },
-  {
-    courseId: 'C004',
-    courseName: 'How To YouTube - Pro Editing',
-    creatorName: 'Design Studio Pro',
-    price: 129,
-    originalPrice: 499,
-    courseSize: '1.90 GB',
-    language: 'Hindi',
-    driveLink: 'https://drive.google.com/drive/folders/sample-pro-editing-link',
-    zipPassword: 'EDIT_PRO_PASS_454',
-    description: 'Premiere Pro & DaVinci Resolve shortcuts, motion graphic templates, sound design packs, and color grading LUTs.',
-    thumbnailUrl: 'https://images.unsplash.com/photo-1574717024653-61fd2cf4d44d?w=800&auto=format&fit=crop&q=80',
-    status: 'Active',
-    createdAt: '2026-10-07'
-  },
-  {
-    courseId: 'C005',
-    courseName: 'Archive: Old Podcasting Setup',
-    creatorName: 'Rohan Sharma',
-    price: 89,
-    originalPrice: 399,
-    courseSize: '1.20 GB',
-    language: 'Hindi',
-    driveLink: 'https://drive.google.com/drive/folders/sample-old-archive-link',
-    zipPassword: 'ARCHIVE_OLD_PASS',
-    description: 'Legacy audio recording basics.',
-    status: 'Inactive',
-    createdAt: '2026-10-05'
-  }
-];
+// Default courses: Empty by default. Courses must be manually added via Admin Panel.
+const DEFAULT_COURSES: Course[] = [];
 
 const DEFAULT_SETTINGS: SettingItem[] = [
   { key: 'UPI_ID', value: 'coursebazar@upi' },
@@ -96,21 +21,7 @@ const DEFAULT_ADMINS: AdminUser[] = [
   { telegramId: config.adminTelegramId || '123456789', name: 'Store Owner', role: 'Owner', status: 'Active' }
 ];
 
-const DEFAULT_PURCHASES: Purchase[] = [
-  {
-    telegramUserId: '987654321',
-    telegramUsername: 'student_rahul',
-    customerName: 'Rahul Verma',
-    courseId: 'C001',
-    courseName: 'Storytelling Mastery',
-    amount: 99,
-    paymentScreenshotFileId: 'sample_file_id_001',
-    status: 'PAID',
-    createdAt: new Date(Date.now() - 3600000 * 5).toISOString(),
-    approvedAt: new Date(Date.now() - 3600000 * 4).toISOString(),
-    approvedBy: config.adminTelegramId || '123456789'
-  }
-];
+const DEFAULT_PURCHASES: Purchase[] = [];
 
 // Helper to wrap any promise in a strict timeout
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operationName: string): Promise<T> {
@@ -163,13 +74,52 @@ export class GoogleSheetsService {
 
   constructor() {
     this.initClient().catch(err => {
-      console.warn('Google Sheets client init notice:', (err as Error).message);
+      console.warn('ℹ️ [DB] Google Sheets client init notice:', (err as Error).message);
     });
   }
 
+  public async initializeSheets(): Promise<boolean> {
+    return this.initClient();
+  }
+
+  private handleGoogleApiError(context: string, err: any): void {
+    const errMsg = err?.message || String(err);
+    const isNotFound =
+      err?.code === 404 ||
+      errMsg.includes('404') ||
+      errMsg.toLowerCase().includes('not found') ||
+      errMsg.toLowerCase().includes('requested entity was not found');
+    const isPermission =
+      err?.code === 403 ||
+      errMsg.includes('403') ||
+      errMsg.toLowerCase().includes('permission');
+    const isAuth =
+      errMsg.includes('DECODER') ||
+      errMsg.includes('unsupported') ||
+      errMsg.toLowerCase().includes('jwt') ||
+      errMsg.toLowerCase().includes('private key');
+
+    if (isNotFound) {
+      this.isConnected = false;
+      this.lastSyncError = `Spreadsheet ID "${config.googleSheetId}" not found (404). Operating in high-speed built-in store mode.`;
+      console.warn(`ℹ️ [DB] ${context}: Spreadsheet not found (404). Switched to high-speed built-in store mode.`);
+    } else if (isPermission) {
+      this.isConnected = false;
+      this.lastSyncError = `Permission denied (403). Share Google Sheet with ${config.googleServiceAccountEmail} as Editor. Operating in built-in store mode.`;
+      console.warn(`ℹ️ [DB] ${context}: Permission denied (403). Switched to built-in store mode.`);
+    } else if (isAuth) {
+      this.isConnected = false;
+      this.lastSyncError = 'Google Service Account credentials invalid. Operating in built-in store mode.';
+      console.warn(`ℹ️ [DB] ${context}: Service account invalid. Switched to built-in store mode.`);
+    } else {
+      this.lastSyncError = errMsg;
+      console.warn(`⚠️ [DB] ${context} notice:`, errMsg);
+    }
+  }
+
   private async initClient(): Promise<boolean> {
-    if (!config.isGoogleConfigured) {
-      console.log('ℹ️ [DB] Running with high-speed built-in store mode (Google credentials not in .env).');
+    if (!config.isGoogleConfigured || !config.googleSheetId) {
+      console.log('ℹ️ [DB] Running with high-speed built-in store mode (Google Sheet ID not configured).');
       this.isConnected = false;
       return false;
     }
@@ -192,19 +142,34 @@ export class GoogleSheetsService {
       });
 
       this.sheetsClient = google.sheets({ version: 'v4', auth });
-      this.isConnected = true;
-      console.log('✅ [DB] Google Sheets API v4 initialized successfully with JWT auth.');
 
-      // Warm up cache in background non-blocking
-      setTimeout(() => {
-        this.refreshCoursesFromGoogle().catch(() => {});
-        this.refreshPurchasesFromGoogle().catch(() => {});
-      }, 500);
+      // Actively verify spreadsheet existence and permissions before marking connected
+      try {
+        const testRes = await withTimeout(
+          this.sheetsClient.spreadsheets.get({
+            spreadsheetId: config.googleSheetId
+          }),
+          this.API_TIMEOUT,
+          'verifySpreadsheetAccess'
+        );
+        this.isConnected = true;
+        this.lastSyncError = null;
+        console.log(`✅ [DB] Google Sheets API v4 connected to spreadsheet: "${testRes.data.properties?.title || config.googleSheetId}"`);
 
-      return true;
+        // Warm up cache in background non-blocking only if connected successfully
+        setTimeout(() => {
+          this.refreshCoursesFromGoogle().catch(() => {});
+          this.refreshPurchasesFromGoogle().catch(() => {});
+        }, 500);
+
+        return true;
+      } catch (verifyErr: any) {
+        this.handleGoogleApiError('Initial spreadsheet verification', verifyErr);
+        this.isConnected = false;
+        return false;
+      }
     } catch (error: any) {
-      this.lastSyncError = (error as Error).message || String(error);
-      console.warn('⚠️ [DB] Google Sheets API init notice:', this.lastSyncError);
+      this.handleGoogleApiError('Google Sheets client initialization', error);
       this.isConnected = false;
       return false;
     }
@@ -257,26 +222,12 @@ export class GoogleSheetsService {
         createdAt: String(row[12] || new Date().toISOString().split('T')[0]).trim()
       })).filter(c => c.courseId && c.courseName);
 
-      if (fetchedCourses.length > 0) {
-        this.coursesCache = fetchedCourses;
-        this.lastCoursesFetch = Date.now();
-        this.lastSyncError = null;
-      }
+      this.coursesCache = fetchedCourses;
+      this.lastCoursesFetch = Date.now();
+      this.lastSyncError = null;
     } catch (err: any) {
-      const errMsg = err?.message || String(err);
-      if (err?.code === 404 || errMsg.includes('404')) {
-        this.lastSyncError = `Spreadsheet ID "${config.googleSheetId}" not found. Verify ID or share with service account.`;
-        this.lastCoursesFetch = Date.now() + 300_000;
-      } else if (err?.code === 403 || errMsg.includes('403')) {
-        this.lastSyncError = `Permission denied. Please share your Google Sheet with ${config.googleServiceAccountEmail} (Editor).`;
-        this.lastCoursesFetch = Date.now() + 300_000;
-      } else if (errMsg.includes('DECODER') || errMsg.includes('unsupported')) {
-        this.lastSyncError = 'Google Service Account private key format error.';
-        this.isConnected = false;
-      } else {
-        this.lastSyncError = errMsg;
-      }
-      console.warn('⚠️ [DB] Non-blocking course refresh notice:', this.lastSyncError);
+      this.handleGoogleApiError('Non-blocking course refresh', err);
+      this.lastCoursesFetch = Date.now() + 300_000;
     } finally {
       this.isFetchingCourses = false;
     }
@@ -361,20 +312,8 @@ export class GoogleSheetsService {
         this.lastSyncError = null;
       }
     } catch (err: any) {
-      const errMsg = err?.message || String(err);
-      if (err?.code === 404 || errMsg.includes('404')) {
-        this.lastSyncError = `Spreadsheet ID "${config.googleSheetId}" not found. Verify ID or share with service account.`;
-        this.lastPurchasesFetch = Date.now() + 300_000;
-      } else if (err?.code === 403 || errMsg.includes('403')) {
-        this.lastSyncError = `Permission denied. Please share your Google Sheet with ${config.googleServiceAccountEmail} (Editor).`;
-        this.lastPurchasesFetch = Date.now() + 300_000;
-      } else if (errMsg.includes('DECODER') || errMsg.includes('unsupported')) {
-        this.lastSyncError = 'Google Service Account private key format error.';
-        this.isConnected = false;
-      } else {
-        this.lastSyncError = errMsg;
-      }
-      console.warn('⚠️ [DB] Non-blocking purchases refresh notice:', this.lastSyncError);
+      this.handleGoogleApiError('Non-blocking purchases refresh', err);
+      this.lastPurchasesFetch = Date.now() + 300_000;
     } finally {
       this.isFetchingPurchases = false;
     }
@@ -467,7 +406,7 @@ export class GoogleSheetsService {
         this.API_TIMEOUT,
         'appendPurchaseToGoogle'
       ).catch(err => {
-        console.error('❌ [DB] Non-blocking append error:', err.message || err);
+        this.handleGoogleApiError('Non-blocking append purchase', err);
       });
     }
 
@@ -544,7 +483,7 @@ export class GoogleSheetsService {
             }
           }
         } catch (err: any) {
-          console.error('❌ [DB] Non-blocking purchase status sync error:', err.message || err);
+          this.handleGoogleApiError('Non-blocking purchase status sync', err);
         }
       })().catch(() => {});
     }
@@ -579,7 +518,9 @@ export class GoogleSheetsService {
           this.adminsCache = fetched;
           this.lastAdminsFetch = Date.now();
         }
-      }).catch(() => {}).finally(() => {
+      }).catch(err => {
+        this.handleGoogleApiError('Non-blocking admins fetch', err);
+      }).finally(() => {
         this.isFetchingAdmins = false;
       });
     }
@@ -622,7 +563,9 @@ export class GoogleSheetsService {
           this.settingsCache = fetched;
           this.lastSettingsFetch = Date.now();
         }
-      }).catch(() => {}).finally(() => {
+      }).catch(err => {
+        this.handleGoogleApiError('Non-blocking settings fetch', err);
+      }).finally(() => {
         this.isFetchingSettings = false;
       });
     }
@@ -714,7 +657,7 @@ export class GoogleSheetsService {
         this.API_TIMEOUT,
         'appendCourseToGoogle'
       ).catch(err => {
-        console.error('❌ [DB] Non-blocking append course error:', err.message || err);
+        this.handleGoogleApiError('Non-blocking append course', err);
       });
     }
 
@@ -783,7 +726,7 @@ export class GoogleSheetsService {
             }
           }
         } catch (err: any) {
-          console.error('❌ [DB] Non-blocking course update error:', err.message || err);
+          this.handleGoogleApiError('Non-blocking course update', err);
         }
       })().catch(() => {});
     }
@@ -833,7 +776,7 @@ export class GoogleSheetsService {
             }
           }
         } catch (err: any) {
-          console.error('❌ [DB] Non-blocking course delete error:', err.message || err);
+          this.handleGoogleApiError('Non-blocking course delete', err);
         }
       })().catch(() => {});
     }

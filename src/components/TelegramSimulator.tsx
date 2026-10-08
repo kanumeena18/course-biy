@@ -182,6 +182,14 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
     if (action === 'browse') {
       addCustomerMessage({ sender: 'user', text: '📚 Browse Courses' });
       const activeCourses = courses.filter(c => c.status.toLowerCase() === 'active');
+      if (activeCourses.length === 0) {
+        addCustomerMessage({
+          sender: 'bot',
+          text: `📚 <b>AVAILABLE COURSES (0)</b>\n\nNo courses are currently listed. Please add courses from the Admin Panel or check back soon!`,
+          buttons: [{ label: '🔙 Back to Menu', action: 'start' }]
+        });
+        return;
+      }
       addCustomerMessage({
         sender: 'bot',
         text: `📚 <b>AVAILABLE COURSES (${activeCourses.length})</b>\n\nClick any course to inspect curriculum, size, and price:`,
@@ -832,25 +840,27 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
               </button>
 
               <button
+                disabled={courses.length === 0}
                 onClick={() => {
                   const c = courses[0];
                   if (c) handleButtonClick(`view_course_${c.courseId}`);
                 }}
-                className="w-full text-left px-3 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 text-xs font-semibold text-slate-700 transition flex items-center justify-between border border-slate-200/60"
+                className="w-full text-left px-3 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-semibold text-slate-700 transition flex items-center justify-between border border-slate-200/60"
               >
                 <span>3. View Course Details</span>
-                <span className="text-slate-400 text-[10px] font-normal">Private ZIP safe</span>
+                <span className="text-slate-400 text-[10px] font-normal">{courses.length > 0 ? 'Private ZIP safe' : 'Add course first'}</span>
               </button>
 
               <button
+                disabled={courses.length === 0}
                 onClick={() => {
                   const c = courses[0];
                   if (c) handleButtonClick(`buy_${c.courseId}`);
                 }}
-                className="w-full text-left px-3 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 text-xs font-semibold text-slate-700 transition flex items-center justify-between border border-slate-200/60"
+                className="w-full text-left px-3 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-semibold text-slate-700 transition flex items-center justify-between border border-slate-200/60"
               >
                 <span>4. View UPI QR Code</span>
-                <span className="text-slate-400 text-[10px] font-normal">No Order ID / UTR</span>
+                <span className="text-slate-400 text-[10px] font-normal">{courses.length > 0 ? 'No Order ID / UTR' : 'Add course first'}</span>
               </button>
 
               <button

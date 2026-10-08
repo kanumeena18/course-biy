@@ -339,8 +339,17 @@ export const GoogleSheetsViewer: React.FC<GoogleSheetsViewerProps> = ({
               <tbody className="divide-y divide-slate-100 text-slate-700">
                 {filteredCourses.length === 0 ? (
                   <tr>
-                    <td colSpan={12} className="py-8 text-center text-slate-400">
-                      No courses found matching "{searchQuery}"
+                    <td colSpan={12} className="py-12 text-center text-slate-500">
+                      {courses.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center space-y-2">
+                          <p className="text-sm font-semibold text-slate-700">No courses in store yet</p>
+                          <p className="text-xs text-slate-400 max-w-sm">
+                            Click <span className="font-semibold text-blue-600">"+ Add Row"</span> above to add your first course with Google Drive link and ZIP password.
+                          </p>
+                        </div>
+                      ) : (
+                        <span>No courses found matching "{searchQuery}"</span>
+                      )}
                     </td>
                   </tr>
                 ) : (

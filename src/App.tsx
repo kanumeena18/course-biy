@@ -1,26 +1,40 @@
 import React, { useState, useEffect } from 'react';
+import { AlertCircle, CheckCircle, Info, X } from 'lucide-react';
 import { Sidebar } from './components/Sidebar.js';
 import { Header } from './components/Header.js';
 import { KPICards } from './components/KPICards.js';
 import { TelegramSimulator } from './components/TelegramSimulator.js';
 import { GoogleSheetsViewer } from './components/GoogleSheetsViewer.js';
-import { BeginnerGuide } from './components/BeginnerGuide.js';
 import { AddCourseModal } from './components/AddCourseModal.js';
 import { Course, Purchase, AdminUser, SettingItem } from './types/index.js';
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<'simulator' | 'sheets' | 'guide'>('simulator');
+  const [activeTab, setActiveTab] = useState<'simulator' | 'sheets'>('simulator');
   const [isAddCourseOpen, setIsAddCourseOpen] = useState(false);
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
   const [isTogglingBot, setIsTogglingBot] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [notification, setNotification] = useState<{
+    type: 'error' | 'success' | 'info';
+    message: string;
+  } | null>(null);
+
+  const showNotification = (message: string, type: 'error' | 'success' | 'info' = 'info') => {
+    setNotification({ type, message });
+    setTimeout(() => {
+      setNotification((prev) => (prev?.message === message ? null : prev));
+    }, 6000);
+  };
 
   const [statusData, setStatusData] = useState({
     bot: {
       isRunning: false,
       tokenConfigured: false,
       maskedToken: 'Not configured',
-      adminId: ''
+      adminId: '',
+      botUsername: null as string | null,
+      lastError: null as string | null,
+      isUnauthorized: false
     },
     sheets: {
       connected: false,
@@ -85,11 +99,16 @@ export function App() {
       });
       const data = await res.json();
       if (!data.success) {
-        alert(data.message || 'Could not toggle bot. Please check your BOT_TOKEN in .env');
+        showNotification(
+          data.message || 'Could not launch live bot. Please check your BOT_TOKEN from @BotFather in .env or settings.',
+          'error'
+        );
+      } else {
+        showNotification(data.message || `Bot successfully ${action === 'START' ? 'started' : 'stopped'}!`, 'success');
       }
       await loadAllData();
     } catch (err: any) {
-      alert(`Error toggling bot: ${err.message}`);
+      showNotification(`Error toggling bot: ${err.message}`, 'error');
     } finally {
       setIsTogglingBot(false);
     }
@@ -104,6 +123,7 @@ export function App() {
       });
       const data = await res.json();
       if (data.success) {
+        showNotification(`Payment ${action === 'APPROVE' ? 'Approved' : 'Rejected'} successfully!`, 'success');
         await loadAllData();
       }
     } catch (err) {
@@ -118,14 +138,15 @@ export function App() {
       });
       const data = await res.json();
       if (data.success) {
+        showNotification('Course deleted successfully from Google Sheets!', 'success');
         await loadAllData();
         return true;
       } else {
-        alert(data.error || 'Failed to delete course');
+        showNotification(data.error || 'Failed to delete course', 'error');
         return false;
       }
     } catch (err: any) {
-      alert(`Error deleting course: ${err.message}`);
+      showNotification(`Error deleting course: ${err.message}`, 'error');
       return false;
     }
   };
@@ -179,6 +200,39 @@ export function App() {
 
         {/* Dashboard Body */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl w-full mx-auto">
+          {/* Notification Toast */}
+          {notification && (
+            <div
+              className={`p-4 rounded-xl border flex items-start justify-between shadow-xs transition-all ${
+                notification.type === 'error'
+                  ? 'bg-rose-50 border-rose-200 text-rose-800'
+                  : notification.type === 'success'
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                  : 'bg-blue-50 border-blue-200 text-blue-800'
+              }`}
+            >
+              <div className="flex items-start space-x-2.5">
+                {notification.type === 'error' ? (
+                  <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                ) : notification.type === 'success' ? (
+                  <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                ) : (
+                  <Info className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                )}
+                <div className="text-xs sm:text-sm font-medium leading-relaxed">
+                  {notification.message}
+                </div>
+              </div>
+              <button
+                onClick={() => setNotification(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-black/5 transition ml-2"
+                aria-label="Dismiss notification"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
           {/* Top KPI Metric Cards */}
           <KPICards
             courses={courses}
@@ -225,8 +279,6 @@ export function App() {
               initialTab={pendingCount > 0 ? 'Purchases' : 'Courses'}
             />
           )}
-
-          {activeTab === 'guide' && <BeginnerGuide />}
         </main>
       </div>
 

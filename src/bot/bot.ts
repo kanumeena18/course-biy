@@ -205,6 +205,10 @@ let runningBotInstance: Telegraf<Context> | null = null;
 let isBotRunning = false;
 let expiryCheckInterval: NodeJS.Timeout | null = null;
 let reconnectTimer: NodeJS.Timeout | null = null;
+let lastBotError: string | null = null;
+let botUsername: string | null = null;
+let retryCount = 0;
+const MAX_RETRIES = 3;
 
 export async function startTelegramBot(token = config.botToken): Promise<{ success: boolean; message: string }> {
   if (isBotRunning && runningBotInstance) {
@@ -212,16 +216,44 @@ export async function startTelegramBot(token = config.botToken): Promise<{ succe
   }
 
   if (!token || !token.includes(':')) {
+    lastBotError = 'Cannot start bot: BOT_TOKEN is missing or not configured.';
     return {
       success: false,
-      message: 'Cannot start bot: BOT_TOKEN is missing or invalid in .env or settings.'
+      message: 'Cannot start bot: BOT_TOKEN is missing or invalid in .env or settings. Use the interactive Bot Simulator or configure a valid token from @BotFather.'
     };
   }
 
   try {
     const bot = createBot(token);
     if (!bot) {
+      lastBotError = 'Failed to create bot instance.';
       return { success: false, message: 'Failed to create bot instance.' };
+    }
+
+    // Pre-flight credentials verification with Telegram API getMe()
+    // This cleanly checks for 401 Unauthorized before launching polling
+    try {
+      const me = await bot.telegram.getMe();
+      botUsername = me.username || null;
+      lastBotError = null;
+      console.log(`🤖 [Telegram Bot] Verified credentials for @${me.username || 'bot'} (${me.first_name || 'Course Bazar'})`);
+    } catch (authErr: any) {
+      const errorMsg = authErr?.message || String(authErr);
+      const is401 = authErr?.response?.error_code === 401 || errorMsg.includes('401') || errorMsg.toLowerCase().includes('unauthorized');
+
+      if (is401) {
+        lastBotError = '401: Unauthorized (Invalid or expired Telegram BOT_TOKEN)';
+        console.warn('⚠️ [Telegram Bot] Token authorization check: 401 Unauthorized. Bot polling disabled; interactive Bot Simulator is active.');
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
+        return {
+          success: false,
+          message: '401 Unauthorized: Telegram BOT_TOKEN is invalid or expired. Check token from @BotFather. You can continue using the Bot Simulator.'
+        };
+      }
+      console.warn('⚠️ [Telegram Bot] Pre-flight check notice:', errorMsg);
     }
 
     runningBotInstance = bot;
@@ -233,6 +265,8 @@ export async function startTelegramBot(token = config.botToken): Promise<{ succe
     });
 
     isBotRunning = true;
+    lastBotError = null;
+    retryCount = 0;
     console.log('🚀 [Bot] Course Bazar Telegram bot launched and actively listening for updates!');
 
     // Clean up any existing interval before creating a new one
@@ -255,32 +289,70 @@ export async function startTelegramBot(token = config.botToken): Promise<{ succe
 
     return { success: true, message: 'Bot started successfully!' };
   } catch (error: any) {
-    console.error('❌ [Bot Launch Error]:', error.message || error);
+    const errorMsg = error?.message || String(error);
+    const is401 = error?.response?.error_code === 401 || errorMsg.includes('401') || errorMsg.toLowerCase().includes('unauthorized');
+    const is409 = error?.response?.error_code === 409 || errorMsg.includes('409') || errorMsg.toLowerCase().includes('conflict');
+
     isBotRunning = false;
     runningBotInstance = null;
 
-    // Handle 409 Conflict (e.g. another instance running elsewhere)
-    if (error.message?.includes('409') || error.message?.includes('Conflict')) {
+    if (is401) {
+      lastBotError = '401: Unauthorized (Invalid or expired Telegram BOT_TOKEN)';
+      console.warn('⚠️ [Telegram Bot Launch]: 401 Unauthorized. The provided BOT_TOKEN is invalid or revoked. Polling paused.');
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      return {
+        success: false,
+        message: '401 Unauthorized: Telegram BOT_TOKEN is invalid or expired. Please check your token from @BotFather.'
+      };
+    }
+
+    if (is409) {
+      lastBotError = '409 Conflict: Another bot instance is already polling with this token.';
+      console.warn('⚠️ [Telegram Bot Launch]: 409 Conflict. Another instance is active.');
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
       return {
         success: false,
         message: 'Conflict: Another bot instance is already polling with this BOT_TOKEN. Make sure only one process is active.'
       };
     }
 
-    // Schedule safe retry after 5 seconds
-    if (!reconnectTimer) {
+    lastBotError = errorMsg;
+    console.warn('⚠️ [Telegram Bot Launch Notice]:', errorMsg);
+
+    // Schedule safe retry ONLY for transient network disconnects (max 3 retries, exponential backoff)
+    const isTransientNetworkError =
+      errorMsg.includes('ETIMEDOUT') ||
+      errorMsg.includes('ECONNRESET') ||
+      errorMsg.includes('ENOTFOUND') ||
+      (error?.response?.error_code && error.response.error_code >= 500);
+
+    if (isTransientNetworkError && !reconnectTimer && retryCount < MAX_RETRIES) {
+      retryCount++;
+      const delay = Math.min(5000 * Math.pow(2, retryCount - 1), 30000);
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
-        console.log('🔄 [Bot Auto-Recovery] Attempting to reconnect bot...');
+        console.log(`🔄 [Bot Auto-Recovery] Attempting to reconnect bot (attempt ${retryCount}/${MAX_RETRIES})...`);
         startTelegramBot(token).catch(() => {});
-      }, 5000);
+      }, delay);
     }
 
-    return { success: false, message: error.message || 'Failed to start bot' };
+    return { success: false, message: errorMsg || 'Failed to start bot' };
   }
 }
 
 export function stopTelegramBot(): { success: boolean; message: string } {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  retryCount = 0;
+
   if (!isBotRunning || !runningBotInstance) {
     return { success: true, message: 'Bot is not currently running.' };
   }
@@ -289,10 +361,6 @@ export function stopTelegramBot(): { success: boolean; message: string } {
     if (expiryCheckInterval) {
       clearInterval(expiryCheckInterval);
       expiryCheckInterval = null;
-    }
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
     }
 
     runningBotInstance.stop('USER_STOP');
@@ -314,6 +382,9 @@ export function getBotStatus() {
     maskedToken: config.botToken ? `${config.botToken.substring(0, 7)}...${config.botToken.slice(-4)}` : 'Not set',
     adminId: config.adminTelegramId || 'Not set',
     upiId: config.upiId,
-    payeeName: config.payeeName
+    payeeName: config.payeeName,
+    botUsername,
+    lastError: lastBotError,
+    isUnauthorized: Boolean(lastBotError?.includes('401'))
   };
 }

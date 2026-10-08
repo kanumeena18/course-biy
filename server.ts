@@ -40,6 +40,61 @@ app.get('/api/courses', async (req, res) => {
   }
 });
 
+app.get('/api/courses/export-csv', async (req, res) => {
+  try {
+    const courses = await googleSheetsService.getCourses(false);
+    const headers = [
+      'Course ID',
+      'Course Name',
+      'Creator Name',
+      'Original Price',
+      'Selling Price',
+      'File Size',
+      'Language',
+      'Google Drive Link',
+      'Zip Password',
+      'Thumbnail URL',
+      'Description',
+      'Status',
+      'Upload Date'
+    ];
+
+    const escapeCell = (val: any) => {
+      if (val === null || val === undefined) return '""';
+      const str = String(val);
+      return `"${str.replace(/"/g, '""')}"`;
+    };
+
+    const rows = courses.map((c: any) => [
+      escapeCell(c.courseId),
+      escapeCell(c.courseName),
+      escapeCell(c.creatorName),
+      escapeCell(c.originalPrice),
+      escapeCell(c.price),
+      escapeCell(c.courseSize),
+      escapeCell(c.language),
+      escapeCell(c.driveLink),
+      escapeCell(c.zipPassword),
+      escapeCell(c.thumbnailUrl || ''),
+      escapeCell(c.description || ''),
+      escapeCell(c.status),
+      escapeCell(c.createdAt)
+    ]);
+
+    const csvString = '\uFEFF' + [
+      headers.map(h => `"${h}"`).join(','),
+      ...rows.map(r => r.join(','))
+    ].join('\r\n');
+
+    const dateStamp = new Date().toISOString().split('T')[0];
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="courses_backup_${dateStamp}.csv"`);
+    res.status(200).send(csvString);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.post('/api/courses', async (req, res) => {
   try {
     const courseData = req.body;

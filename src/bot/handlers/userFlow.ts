@@ -104,7 +104,7 @@ export async function handleUserText(ctx: Context) {
 
       // If single course match, present directly with thumbnail photo!
       if (results.length === 1) {
-        await sendCourseCard(ctx, results[0], `🔎 <b>MATCH FOUND FOR:</b> "${rawText}"\n\n`);
+        await sendCourseCard(ctx, results[0]);
         return;
       }
 

@@ -4,10 +4,11 @@ import { config } from '../../config/config.js';
 export const messages = {
   welcome: () => {
     return (
-      `🎓 <b>COURSE BAZAR</b>\n\n` +
-      `Welcome to Course Bazar!\n\n` +
-      `Find your course, make the payment using UPI, and receive your course access after payment verification.\n\n` +
-      `Select an option below to get started:`
+      `🎓 <b>Welcome to Course Bazar!</b>\n\n` +
+      `📚 Discover quality courses at affordable prices.\n\n` +
+      `🔎 Search for a course by name to get started.\n\n` +
+      `💳 Simple & secure payment\n` +
+      `⚡ Fast access after verification`
     );
   },
 
@@ -27,28 +28,57 @@ export const messages = {
     );
   },
 
-  support: (supportUsername = config.supportUsername) => {
+  support: () => {
     return (
       `💬 <b>CUSTOMER SUPPORT</b>\n\n` +
       `Have questions about a course or payment?\n\n` +
-      `Reach out directly to our official support handle:\n` +
-      `👉 <b>${supportUsername}</b>\n\n` +
-      `We typically respond within a few hours!`
+      `📩 Email: <a href="mailto:coursebazar01@gmail.com">coursebazar01@gmail.com</a>\n` +
+      `👤 Telegram: <a href="https://t.me/kanumeena18">@kanumeena18</a>\n\n` +
+      `We’ll get back to you as soon as possible!`
     );
   },
 
-  courseCard: (course: Course) => {
-    return (
-      `🎓 <b>${course.courseName.toUpperCase()}</b>\n\n` +
-      `👤 <b>Creator:</b> ${course.creatorName}\n` +
-      `🌐 <b>Language:</b> ${course.language}\n` +
-      `💾 <b>Course Size:</b> ${course.courseSize}\n` +
-      `💰 <b>Price:</b> ${config.currency}${course.price}\n` +
-      `🏷️ <b>Original Price:</b> <s>${config.currency}${course.originalPrice}</s>\n` +
-      `🔐 <b>Password Protected ZIP</b>\n` +
-      `📦 <b>Digital Course</b>\n\n` +
-      `📝 <i>${course.description}</i>`
-    );
+  courseCard: (course: Course, contactInfo = config.supportUsername) => {
+    const lines: string[] = [];
+
+    // Header: 🎬 Course title / short title
+    lines.push(`🎬 <b>${course.courseName}</b>\n`);
+
+    // Course Information block
+    lines.push(`🎓 <b>Course:</b> ${course.courseName}`);
+    if (course.courseSize) {
+      lines.push(`💾 <b>Course Size:</b> ${course.courseSize}`);
+    }
+    if (course.language) {
+      lines.push(`👤 <b>Language:</b> ${course.language}`);
+    }
+
+    lines.push(''); // spacing
+
+    // Pricing block
+    if (course.originalPrice && course.originalPrice > 0) {
+      lines.push(`💰 <b>Original Price:</b> ₹${course.originalPrice}`);
+    }
+    lines.push(`🔥 <b>Our Price:</b> ₹${course.price}`);
+
+    // Description block (show if provided)
+    if (course.description && course.description.trim()) {
+      lines.push('');
+      lines.push(`📚 <i>${course.description.trim()}</i>`);
+    }
+
+    // Google Drive Link block (if available)
+    if (course.driveLink && course.driveLink.trim()) {
+      lines.push('');
+      lines.push(`🔗 <b>Get the Course:</b>\n${course.driveLink.trim()}`);
+    }
+
+    // Vertical spacing equivalent to two Enter/line breaks after Course Link, then Contact Email
+    lines.push('');
+    lines.push('');
+    lines.push(`📩 <b>Contact:</b> <a href="mailto:coursebazar01@gmail.com">coursebazar01@gmail.com</a>`);
+
+    return lines.join('\n');
   },
 
   paymentCard: (course: Course, upiId = config.upiId, payeeName = config.payeeName) => {

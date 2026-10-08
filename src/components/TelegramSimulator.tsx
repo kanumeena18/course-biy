@@ -41,7 +41,7 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
     {
       id: 'm1',
       sender: 'bot',
-      text: `🎓 <b>COURSE BAZAR</b>\n\nWelcome to Course Bazar!\n\nFind your course, make the payment using UPI, and receive your course access after payment verification.`,
+      text: `🎓 <b>Welcome to Course Bazar!</b>\n\n📚 Discover quality courses at affordable prices.\n\n🔎 Search for a course by name to get started.\n\n💳 Simple & secure payment\n⚡ Fast access after verification`,
       timestamp: '10:00 AM',
       buttons: [
         { label: '🔎 Search Course', action: 'search' },
@@ -58,6 +58,50 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const adminChatEndRef = useRef<HTMLDivElement>(null);
+
+  // Formatter matching Telegram Bot's redesigned course card layout
+  const formatCourseCard = (course: Course) => {
+    const lines: string[] = [];
+
+    // Header: 🎬 Course title / short title
+    lines.push(`🎬 <b>${course.courseName}</b>\n`);
+
+    // Course Information block
+    lines.push(`🎓 <b>Course:</b> ${course.courseName}`);
+    if (course.courseSize) {
+      lines.push(`💾 <b>Course Size:</b> ${course.courseSize}`);
+    }
+    if (course.language) {
+      lines.push(`👤 <b>Language:</b> ${course.language}`);
+    }
+
+    lines.push(''); // spacing
+
+    // Pricing block
+    if (course.originalPrice && course.originalPrice > 0) {
+      lines.push(`💰 <b>Original Price:</b> ${configData.currency}${course.originalPrice}`);
+    }
+    lines.push(`🔥 <b>Our Price:</b> ${configData.currency}${course.price}`);
+
+    // Description block (show if provided)
+    if (course.description && course.description.trim()) {
+      lines.push('');
+      lines.push(`📚 <i>${course.description.trim()}</i>`);
+    }
+
+    // Google Drive Link block (if available)
+    if (course.driveLink && course.driveLink.trim()) {
+      lines.push('');
+      lines.push(`🔗 <b>Get the Course:</b>\n${course.driveLink.trim()}`);
+    }
+
+    // Vertical spacing equivalent to two Enter/line breaks after Course Link, then Contact Email
+    lines.push('');
+    lines.push('');
+    lines.push(`📩 <b>Contact:</b> <a href="mailto:coursebazar01@gmail.com" class="text-blue-600 underline font-medium">coursebazar01@gmail.com</a>`);
+
+    return lines.join('\n');
+  };
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -110,7 +154,7 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
       addCustomerMessage({ sender: 'user', text: '/start' });
       addCustomerMessage({
         sender: 'bot',
-        text: `🎓 <b>COURSE BAZAR</b>\n\nWelcome to Course Bazar!\n\nFind your course, make the payment using UPI, and receive your course access after payment verification.`,
+        text: `🎓 <b>Welcome to Course Bazar!</b>\n\n📚 Discover quality courses at affordable prices.\n\n🔎 Search for a course by name to get started.\n\n💳 Simple & secure payment\n⚡ Fast access after verification`,
         buttons: [
           { label: '🔎 Search Course', action: 'search' },
           { label: '📚 Browse Courses', action: 'browse' },
@@ -160,7 +204,7 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
       addCustomerMessage({
         sender: 'bot',
         photoUrl: course.thumbnailUrl,
-        text: `🎓 <b>${course.courseName.toUpperCase()}</b>\n\n👤 <b>Creator:</b> ${course.creatorName}\n🌐 <b>Language:</b> ${course.language}\n💾 <b>Course Size:</b> ${course.courseSize}\n💰 <b>Price:</b> ${configData.currency}${course.price}\n🏷️ <b>Original Price:</b> <s>${configData.currency}${course.originalPrice}</s>\n🔐 <b>Password Protected ZIP</b>\n📦 <b>Digital Course</b>\n\n📝 <i>${course.description}</i>`,
+        text: formatCourseCard(course),
         buttons: [
           { label: '🛒 BUY NOW', action: `buy_${course.courseId}` },
           { label: '🔙 Back to Courses', action: 'browse' }
@@ -218,7 +262,7 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
       addCustomerMessage({ sender: 'user', text: '💬 Support' });
       addCustomerMessage({
         sender: 'bot',
-        text: `💬 <b>CUSTOMER SUPPORT</b>\n\nFor payment inquiries or course requests, message our official support handle:\n\n👉 <b>${configData.supportUsername}</b>`,
+        text: `💬 <b>CUSTOMER SUPPORT</b>\n\nHave questions about a course or payment?\n\n📩 Email: <a href="mailto:coursebazar01@gmail.com" class="text-blue-600 underline font-medium">coursebazar01@gmail.com</a>\n👤 Telegram: <a href="https://t.me/kanumeena18" target="_blank" rel="noopener noreferrer" class="text-blue-600 underline font-medium">@kanumeena18</a>\n\nWe’ll get back to you as soon as possible!`,
         buttons: [{ label: '🔙 Back to Menu', action: 'start' }]
       });
       return;
@@ -423,7 +467,7 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
         addCustomerMessage({
           sender: 'bot',
           photoUrl: course.thumbnailUrl,
-          text: `🔎 <b>MATCH FOUND FOR:</b> "${text}"\n\n🎓 <b>${course.courseName.toUpperCase()}</b>\n\n👤 <b>Creator:</b> ${course.creatorName}\n🌐 <b>Language:</b> ${course.language}\n💾 <b>Course Size:</b> ${course.courseSize}\n💰 <b>Price:</b> ${configData.currency}${course.price}\n🏷️ <b>Original Price:</b> <s>${configData.currency}${course.originalPrice}</s>\n🔐 <b>Password Protected ZIP</b>\n📦 <b>Digital Course</b>\n\n📝 <i>${course.description}</i>`,
+          text: formatCourseCard(course),
           buttons: [
             { label: '🛒 BUY NOW', action: `buy_${course.courseId}` },
             { label: '🔙 Back to Menu', action: 'start' }

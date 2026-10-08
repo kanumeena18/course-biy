@@ -23,9 +23,30 @@ export interface AppConfig {
   isBotConfigured: boolean;
 }
 
-const formatPrivateKey = (key?: string): string => {
+export const formatPrivateKey = (key?: string): string => {
   if (!key) return '';
-  return key.replace(/\\n/g, '\n');
+  let cleaned = key.trim();
+
+  // Strip wrapping quotes (single or double)
+  while (
+    (cleaned.startsWith('"') && cleaned.endsWith('"')) ||
+    (cleaned.startsWith("'") && cleaned.endsWith("'"))
+  ) {
+    cleaned = cleaned.slice(1, -1).trim();
+  }
+
+  // Handle double backslash newlines and carriage returns
+  cleaned = cleaned.replace(/\\n/g, '\n').replace(/\\r/g, '').trim();
+
+  // Strip wrapping quotes again in case they were escaped inside
+  while (
+    (cleaned.startsWith('"') && cleaned.endsWith('"')) ||
+    (cleaned.startsWith("'") && cleaned.endsWith("'"))
+  ) {
+    cleaned = cleaned.slice(1, -1).trim();
+  }
+
+  return cleaned;
 };
 
 const resolveQrPath = (customPath?: string): string => {

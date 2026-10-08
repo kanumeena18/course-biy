@@ -1,15 +1,18 @@
 import React from 'react';
-import { Bot, Sheet, BookOpen, Play, Square, CheckCircle2, AlertCircle, Database, ShieldCheck, TrendingUp, Sparkles, X } from 'lucide-react';
+import { Bot, Sheet, Play, Square, CheckCircle2, AlertCircle, Database, ShieldCheck, TrendingUp, Sparkles, X } from 'lucide-react';
 
 interface SidebarProps {
-  activeTab: 'simulator' | 'sheets' | 'guide';
-  setActiveTab: (tab: 'simulator' | 'sheets' | 'guide') => void;
+  activeTab: 'simulator' | 'sheets';
+  setActiveTab: (tab: 'simulator' | 'sheets') => void;
   botStatus: {
     isRunning: boolean;
     tokenConfigured: boolean;
     maskedToken: string;
     adminId: string;
     upiId?: string;
+    botUsername?: string | null;
+    lastError?: string | null;
+    isUnauthorized?: boolean;
   };
   sheetsStatus: {
     connected: boolean;
@@ -54,14 +57,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: Sheet,
       badge: `${stats.totalCourses} Courses`,
       badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200'
-    },
-    {
-      id: 'guide' as const,
-      label: 'Setup Guide',
-      description: 'Windows & Cloud Docs',
-      icon: BookOpen,
-      badge: 'Beginner',
-      badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200'
     }
   ];
 
@@ -210,10 +205,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${
                   botStatus.isRunning
                     ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    : botStatus.isUnauthorized
+                    ? 'bg-amber-50 text-amber-700 border-amber-200'
                     : 'bg-slate-100 text-slate-600 border-slate-200'
                 }`}
+                title={botStatus.lastError || (botStatus.isRunning ? 'Bot is running' : 'Simulator Mode Active')}
               >
-                {botStatus.isRunning ? 'Active Live' : 'Simulator Mode'}
+                {botStatus.isRunning
+                  ? 'Active Live'
+                  : botStatus.isUnauthorized
+                  ? 'Simulator Active'
+                  : 'Simulator Mode'}
               </span>
             </div>
           </div>

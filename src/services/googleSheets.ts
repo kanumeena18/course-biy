@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { google, sheets_v4 } from 'googleapis';
 import { config } from '../config/config.js';
 import { Course, Purchase, AdminUser, SettingItem, PurchaseStatus } from '../types/index.js';
@@ -133,6 +134,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operationName: s
 export class GoogleSheetsService {
   private sheetsClient: sheets_v4.Sheets | null = null;
   private isConnected = false;
+  private lastSyncError: string | null = null;
 
   // In-memory cache & fallback store (Ultra-fast local reads)
   private coursesCache: Course[] = [...DEFAULT_COURSES];
@@ -173,6 +175,16 @@ export class GoogleSheetsService {
     }
 
     try {
+      // Validate private key first using Node crypto
+      try {
+        crypto.createPrivateKey(config.googlePrivateKey);
+      } catch (keyErr: any) {
+        this.lastSyncError = 'Google Service Account private key could not be decoded. Ensure it is a valid RSA private key.';
+        console.warn('⚠️ [DB]', this.lastSyncError);
+        this.isConnected = false;
+        return false;
+      }
+
       const auth = new google.auth.JWT({
         email: config.googleServiceAccountEmail,
         key: config.googlePrivateKey,
@@ -191,7 +203,8 @@ export class GoogleSheetsService {
 
       return true;
     } catch (error: any) {
-      console.error('❌ [DB] Failed to initialize Google Sheets API:', error.message || error);
+      this.lastSyncError = (error as Error).message || String(error);
+      console.warn('⚠️ [DB] Google Sheets API init notice:', this.lastSyncError);
       this.isConnected = false;
       return false;
     }
@@ -205,7 +218,8 @@ export class GoogleSheetsService {
       serviceAccount: config.googleServiceAccountEmail || 'Not configured',
       adminTelegramId: config.adminTelegramId || 'Not configured',
       cachedCoursesCount: this.coursesCache.length,
-      cachedPurchasesCount: this.purchasesCache.length
+      cachedPurchasesCount: this.purchasesCache.length,
+      lastSyncError: this.lastSyncError
     };
   }
 
@@ -246,9 +260,23 @@ export class GoogleSheetsService {
       if (fetchedCourses.length > 0) {
         this.coursesCache = fetchedCourses;
         this.lastCoursesFetch = Date.now();
+        this.lastSyncError = null;
       }
     } catch (err: any) {
-      console.warn('⚠️ [DB] Non-blocking course refresh notice:', err.message || err);
+      const errMsg = err?.message || String(err);
+      if (err?.code === 404 || errMsg.includes('404')) {
+        this.lastSyncError = `Spreadsheet ID "${config.googleSheetId}" not found. Verify ID or share with service account.`;
+        this.lastCoursesFetch = Date.now() + 300_000;
+      } else if (err?.code === 403 || errMsg.includes('403')) {
+        this.lastSyncError = `Permission denied. Please share your Google Sheet with ${config.googleServiceAccountEmail} (Editor).`;
+        this.lastCoursesFetch = Date.now() + 300_000;
+      } else if (errMsg.includes('DECODER') || errMsg.includes('unsupported')) {
+        this.lastSyncError = 'Google Service Account private key format error.';
+        this.isConnected = false;
+      } else {
+        this.lastSyncError = errMsg;
+      }
+      console.warn('⚠️ [DB] Non-blocking course refresh notice:', this.lastSyncError);
     } finally {
       this.isFetchingCourses = false;
     }
@@ -330,9 +358,23 @@ export class GoogleSheetsService {
       if (fetchedPurchases.length > 0) {
         this.purchasesCache = fetchedPurchases;
         this.lastPurchasesFetch = Date.now();
+        this.lastSyncError = null;
       }
     } catch (err: any) {
-      console.warn('⚠️ [DB] Non-blocking purchases refresh notice:', err.message || err);
+      const errMsg = err?.message || String(err);
+      if (err?.code === 404 || errMsg.includes('404')) {
+        this.lastSyncError = `Spreadsheet ID "${config.googleSheetId}" not found. Verify ID or share with service account.`;
+        this.lastPurchasesFetch = Date.now() + 300_000;
+      } else if (err?.code === 403 || errMsg.includes('403')) {
+        this.lastSyncError = `Permission denied. Please share your Google Sheet with ${config.googleServiceAccountEmail} (Editor).`;
+        this.lastPurchasesFetch = Date.now() + 300_000;
+      } else if (errMsg.includes('DECODER') || errMsg.includes('unsupported')) {
+        this.lastSyncError = 'Google Service Account private key format error.';
+        this.isConnected = false;
+      } else {
+        this.lastSyncError = errMsg;
+      }
+      console.warn('⚠️ [DB] Non-blocking purchases refresh notice:', this.lastSyncError);
     } finally {
       this.isFetchingPurchases = false;
     }

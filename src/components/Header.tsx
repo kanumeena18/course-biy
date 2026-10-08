@@ -2,7 +2,7 @@ import React from 'react';
 import { Menu, Plus, RefreshCw, ExternalLink, QrCode, Shield, CheckCircle2 } from 'lucide-react';
 
 interface HeaderProps {
-  activeTab: 'simulator' | 'sheets' | 'guide';
+  activeTab: 'simulator' | 'sheets';
   onOpenAddCourse: () => void;
   onRefreshData: () => void;
   onOpenMobileSidebar: () => void;
@@ -32,11 +32,6 @@ export const Header: React.FC<HeaderProps> = ({
         return {
           title: 'Google Sheets Live Database',
           subtitle: 'Courses, Purchases, Settings, and Admins live table explorer'
-        };
-      case 'guide':
-        return {
-          title: 'Beginner Deployment Guide',
-          subtitle: 'Step-by-step setup for Telegram BotFather, Google Cloud & Windows'
         };
       default:
         return { title: 'Admin Hub', subtitle: 'Course Bazar Administration' };

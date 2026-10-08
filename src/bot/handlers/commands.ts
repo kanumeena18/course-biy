@@ -27,8 +27,7 @@ export async function handleHelp(ctx: Context) {
     sessionManager.reset(ctx.from.id);
   }
   try {
-    const supportUsername = await googleSheetsService.getSetting('SUPPORT_USERNAME', '@coursebazar_support');
-    await ctx.reply(messages.help(supportUsername), {
+    await ctx.reply(messages.help(), {
       parse_mode: 'HTML',
       ...keyboards.mainMenu()
     });

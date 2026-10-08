@@ -12,19 +12,20 @@ export const messages = {
     );
   },
 
-  help: (supportUsername = config.supportUsername) => {
+  help: () => {
     return (
       `❓ <b>HELP & HOW TO BUY</b>\n\n` +
-      `1️⃣ Search or browse for your course.\n` +
-      `2️⃣ Open the course details.\n` +
-      `3️⃣ Click <b>Buy Now</b>.\n` +
-      `4️⃣ Pay manually using our personal UPI QR code.\n` +
-      `5️⃣ Click <b>✅ I HAVE PAID</b>.\n` +
-      `6️⃣ Upload your payment screenshot.\n` +
-      `7️⃣ Wait for manual admin verification in our bank app.\n` +
+      `1️⃣ Search or browse for your course.\n\n` +
+      `2️⃣ Open the course details.\n\n` +
+      `3️⃣ Click Buy Now.\n\n` +
+      `4️⃣ Pay manually using our personal UPI QR code.\n\n` +
+      `5️⃣ Click ✅ I HAVE PAID.\n\n` +
+      `6️⃣ Upload your payment screenshot.\n\n` +
+      `7️⃣ Wait for manual admin verification.\n\n` +
       `8️⃣ After approval, you will receive the Google Drive link and ZIP password!\n\n` +
-      `💬 <b>Need assistance?</b>\n` +
-      `Contact support at: ${supportUsername}`
+      `💬 Need assistance?\n\n` +
+      `📩 Email: <a href="mailto:coursebazar01@gmail.com">coursebazar01@gmail.com</a>\n` +
+      `👤 Telegram: <a href="https://t.me/kanumeena18">@kanumeena18</a>`
     );
   },
 
@@ -46,6 +47,9 @@ export const messages = {
 
     // Course Information block
     lines.push(`🎓 <b>Course:</b> ${course.courseName}`);
+    if (course.creatorName && course.creatorName.trim()) {
+      lines.push(`👤 <b>Creator:</b> ${course.creatorName.trim()}`);
+    }
     if (course.courseSize) {
       lines.push(`💾 <b>Course Size:</b> ${course.courseSize}`);
     }

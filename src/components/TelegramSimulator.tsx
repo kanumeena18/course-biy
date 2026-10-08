@@ -68,6 +68,9 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
 
     // Course Information block
     lines.push(`🎓 <b>Course:</b> ${course.courseName}`);
+    if (course.creatorName && course.creatorName.trim()) {
+      lines.push(`👤 <b>Creator:</b> ${course.creatorName.trim()}`);
+    }
     if (course.courseSize) {
       lines.push(`💾 <b>Course Size:</b> ${course.courseSize}`);
     }
@@ -252,7 +255,7 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
       addCustomerMessage({ sender: 'user', text: '❓ Help' });
       addCustomerMessage({
         sender: 'bot',
-        text: `❓ <b>HELP & HOW TO BUY</b>\n\n1️⃣ Search or browse for your course.\n2️⃣ Open the course details.\n3️⃣ Click <b>Buy Now</b>.\n4️⃣ Pay manually using our personal UPI QR code.\n5️⃣ Click <b>✅ I HAVE PAID</b>.\n6️⃣ Upload your payment screenshot.\n7️⃣ Wait for manual admin verification in our bank app.\n8️⃣ After approval, you will receive the Google Drive link and ZIP password!\n\n💬 Support: ${configData.supportUsername}`,
+        text: `❓ <b>HELP & HOW TO BUY</b>\n\n1️⃣ Search or browse for your course.\n\n2️⃣ Open the course details.\n\n3️⃣ Click Buy Now.\n\n4️⃣ Pay manually using our personal UPI QR code.\n\n5️⃣ Click ✅ I HAVE PAID.\n\n6️⃣ Upload your payment screenshot.\n\n7️⃣ Wait for manual admin verification.\n\n8️⃣ After approval, you will receive the Google Drive link and ZIP password!\n\n💬 Need assistance?\n\n📩 Email: <a href="mailto:coursebazar01@gmail.com" class="text-blue-600 underline font-medium">coursebazar01@gmail.com</a>\n👤 Telegram: <a href="https://t.me/kanumeena18" target="_blank" rel="noopener noreferrer" class="text-blue-600 underline font-medium">@kanumeena18</a>`,
         buttons: [{ label: '🔙 Back to Menu', action: 'start' }]
       });
       return;

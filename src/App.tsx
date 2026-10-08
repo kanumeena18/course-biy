@@ -38,14 +38,17 @@ export function App() {
     },
     sheets: {
       connected: false,
-      hasCredentials: false
+      hasCredentials: false,
+      sheetId: '',
+      serviceAccount: '',
+      lastSyncError: null as string | null
     },
     config: {
       storeName: 'Course Bazar',
-      currency: '₹',
-      upiId: 'coursebazar@upi',
-      payeeName: 'Course Bazar',
-      supportUsername: '@coursebazar_support',
+      currency: 'INR',
+      upiId: '7014180967@fam',
+      payeeName: 'Harsh',
+      supportUsername: '@kanumeena18',
       paymentExpiryHours: 24,
       hasQrAsset: true
     }
@@ -157,7 +160,7 @@ export function App() {
   const totalRevenue = paidPurchases.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans flex antialiased">
+    <div className="min-h-screen bg-[#faf7ee] text-slate-800 font-sans flex antialiased">
       {/* Sidebar Navigation */}
       <Sidebar
         activeTab={activeTab}
@@ -265,6 +268,7 @@ export function App() {
               purchases={purchases}
               settings={settings}
               admins={admins}
+              sheetsStatus={statusData.sheets}
               onRefresh={loadAllData}
               onOpenAddCourse={() => {
                 setEditingCourse(null);

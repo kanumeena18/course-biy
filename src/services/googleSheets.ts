@@ -2,19 +2,20 @@ import crypto from 'crypto';
 import { google, sheets_v4 } from 'googleapis';
 import { config } from '../config/config.js';
 import { Course, Purchase, AdminUser, SettingItem, PurchaseStatus } from '../types/index.js';
+import { systemLogger } from './logger.js';
 
 // Default courses: Empty by default. Courses must be manually added via Admin Panel.
 const DEFAULT_COURSES: Course[] = [];
 
 const DEFAULT_SETTINGS: SettingItem[] = [
-  { key: 'UPI_ID', value: 'coursebazar@upi' },
-  { key: 'PAYEE_NAME', value: 'Course Bazar' },
-  { key: 'SUPPORT_USERNAME', value: '@coursebazar_support' },
+  { key: 'UPI_ID', value: '7014180967@fam' },
+  { key: 'PAYEE_NAME', value: 'Harsh' },
+  { key: 'SUPPORT_USERNAME', value: '@kanumeena18' },
+  { key: 'SUPPORT_EMAIL', value: 'coursebazar01@gmail.com' },
   { key: 'STORE_NAME', value: 'Course Bazar' },
   { key: 'CURRENCY', value: 'INR' },
   { key: 'PAYMENT_EXPIRY_HOURS', value: '24' },
-  { key: 'WELCOME_MESSAGE', value: 'Find your course, make the payment using UPI, and receive your course access after payment verification.' },
-  { key: 'PAYMENT_INSTRUCTIONS', value: 'Please scan the QR code and pay the exact amount. Then click I HAVE PAID and upload the screenshot.' }
+  { key: 'WELCOME_MESSAGE', value: 'Find your course, make the payment using UPI, and receive your course.' }
 ];
 
 const DEFAULT_ADMINS: AdminUser[] = [
@@ -101,11 +102,11 @@ export class GoogleSheetsService {
 
     if (isNotFound) {
       this.isConnected = false;
-      this.lastSyncError = `Spreadsheet ID "${config.googleSheetId}" not found (404). Operating in high-speed built-in store mode.`;
-      console.warn(`ℹ️ [DB] ${context}: Spreadsheet not found (404). Switched to high-speed built-in store mode.`);
+      this.lastSyncError = `Spreadsheet ID "${config.googleSheetId}" not found or not shared (404). In Google Sheets, click Share and add "${config.googleServiceAccountEmail}" as Editor. Operating in built-in store mode.`;
+      console.warn(`ℹ️ [DB] ${context}: Spreadsheet not found or not shared (404). Switched to high-speed built-in store mode.`);
     } else if (isPermission) {
       this.isConnected = false;
-      this.lastSyncError = `Permission denied (403). Share Google Sheet with ${config.googleServiceAccountEmail} as Editor. Operating in built-in store mode.`;
+      this.lastSyncError = `Permission denied (403). Share Google Sheet with "${config.googleServiceAccountEmail}" as Editor. Operating in built-in store mode.`;
       console.warn(`ℹ️ [DB] ${context}: Permission denied (403). Switched to built-in store mode.`);
     } else if (isAuth) {
       this.isConnected = false;
@@ -114,6 +115,107 @@ export class GoogleSheetsService {
     } else {
       this.lastSyncError = errMsg;
       console.warn(`⚠️ [DB] ${context} notice:`, errMsg);
+    }
+
+    systemLogger.log({
+      level: 'error',
+      category: 'sheets',
+      message: this.lastSyncError || errMsg,
+      details: `Context: ${context}. Details: ${errMsg}`
+    });
+  }
+
+  private async ensureRequiredSheets(existingSheets: sheets_v4.Schema$Sheet[]): Promise<void> {
+    if (!this.sheetsClient || !config.googleSheetId) return;
+
+    const existingTitles = new Set(
+      existingSheets.map((s) => s.properties?.title).filter(Boolean) as string[]
+    );
+
+    const requiredSheets: { title: string; headers: string[] }[] = [
+      {
+        title: 'Courses',
+        headers: [
+          'Course ID',
+          'Course Name',
+          'Creator Name',
+          'Original Price',
+          'Selling Price',
+          'File Size',
+          'Language',
+          'Google Drive Link',
+          'Zip Password',
+          'Thumbnail URL',
+          'Description',
+          'Status',
+          'Upload Date'
+        ]
+      },
+      {
+        title: 'Purchases',
+        headers: [
+          'Telegram User ID',
+          'Telegram Username',
+          'Customer Name',
+          'Course ID',
+          'Course Name',
+          'Amount',
+          'Payment Screenshot File ID',
+          'Status',
+          'Created At',
+          'Approved At',
+          'Approved By'
+        ]
+      },
+      {
+        title: 'Settings',
+        headers: ['Key', 'Value']
+      },
+      {
+        title: 'Admins',
+        headers: ['Telegram ID', 'Name', 'Role', 'Status']
+      }
+    ];
+
+    const missingSheets = requiredSheets.filter((r) => !existingTitles.has(r.title));
+    if (missingSheets.length > 0) {
+      try {
+        console.log(`ℹ️ [DB] Auto-creating missing worksheet tabs: ${missingSheets.map((m) => m.title).join(', ')}`);
+        await withTimeout(
+          this.sheetsClient.spreadsheets.batchUpdate({
+            spreadsheetId: config.googleSheetId,
+            requestBody: {
+              requests: missingSheets.map((m) => ({
+                addSheet: {
+                  properties: { title: m.title }
+                }
+              }))
+            }
+          }),
+          this.API_TIMEOUT,
+          'autoCreateMissingSheets'
+        );
+
+        // Add headers to newly created sheets
+        for (const sheet of missingSheets) {
+          const endCol = String.fromCharCode(64 + sheet.headers.length);
+          await withTimeout(
+            this.sheetsClient.spreadsheets.values.update({
+              spreadsheetId: config.googleSheetId,
+              range: `${sheet.title}!A1:${endCol}1`,
+              valueInputOption: 'USER_ENTERED',
+              requestBody: {
+                values: [sheet.headers]
+              }
+            }),
+            this.API_TIMEOUT,
+            `writeHeadersFor_${sheet.title}`
+          );
+        }
+        console.log('✅ [DB] Successfully initialized all required sheets & header rows in Google Spreadsheet.');
+      } catch (sheetErr: any) {
+        console.warn('⚠️ [DB] Notice while auto-creating sheets:', sheetErr?.message || sheetErr);
+      }
     }
   }
 
@@ -152,6 +254,10 @@ export class GoogleSheetsService {
           this.API_TIMEOUT,
           'verifySpreadsheetAccess'
         );
+
+        // Ensure all required sheets (Courses, Purchases, Settings, Admins) exist
+        await this.ensureRequiredSheets(testRes.data.sheets || []);
+
         this.isConnected = true;
         this.lastSyncError = null;
         console.log(`✅ [DB] Google Sheets API v4 connected to spreadsheet: "${testRes.data.properties?.title || config.googleSheetId}"`);
@@ -173,6 +279,20 @@ export class GoogleSheetsService {
       this.isConnected = false;
       return false;
     }
+  }
+
+  public async reconnect(newSheetId?: string): Promise<{ success: boolean; message: string; status: any }> {
+    if (newSheetId && newSheetId.trim()) {
+      config.googleSheetId = newSheetId.trim();
+    }
+    const success = await this.initClient();
+    return {
+      success,
+      message: success
+        ? 'Successfully connected to Google Sheets!'
+        : (this.lastSyncError || 'Failed to connect to Google Sheets. Verify permissions and Sheet ID.'),
+      status: this.getStatus()
+    };
   }
 
   public getStatus() {

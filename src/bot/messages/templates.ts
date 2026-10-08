@@ -2,12 +2,12 @@ import { Course, Purchase } from '../../types/index.js';
 import { config } from '../../config/config.js';
 
 export const messages = {
-  welcome: () => {
+  welcome: (welcomeText = 'Find your course, make the payment using UPI, and receive your course.') => {
     return (
       `🎓 <b>Welcome to Course Bazar!</b>\n\n` +
-      `📚 Discover quality courses at affordable prices.\n\n` +
-      `🔎 Search for a course by name to get started.\n\n` +
-      `💳 Simple & secure payment\n` +
+      `✨ ${welcomeText}\n\n` +
+      `📚 Discover quality courses at affordable prices.\n` +
+      `💳 Simple & secure UPI payment\n` +
       `⚡ Fast access after verification`
     );
   },

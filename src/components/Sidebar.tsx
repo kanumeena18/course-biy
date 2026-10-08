@@ -72,12 +72,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Sidebar Container */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-slate-200/90 flex flex-col transition-transform duration-200 ease-in-out lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-50 w-72 bg-[#fdfbf6] border-r border-[#ece4d4] flex flex-col transition-transform duration-200 ease-in-out lg:translate-x-0 ${
           isOpenMobile ? 'translate-x-0 shadow-2xl' : '-translate-x-full'
         }`}
       >
         {/* Brand / Logo Area */}
-        <div className="h-16 px-6 border-b border-slate-100 flex items-center justify-between">
+        <div className="h-16 px-6 border-b border-[#ece4d4]/80 flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-indigo-700 flex items-center justify-center text-white shadow-md shadow-blue-500/25">
               <span className="text-xl">🎓</span>
@@ -177,7 +177,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Sidebar Footer: System Status & Real Bot Launcher */}
-        <div className="p-4 border-t border-slate-100 bg-slate-50/50 space-y-3">
+        <div className="p-4 border-t border-[#ece4d4]/80 bg-[#f8f4ea]/60 space-y-3">
           {/* Status Indicators */}
           <div className="space-y-1.5 text-xs">
             <div className="flex items-center justify-between px-1">

@@ -63,13 +63,13 @@ export const config: AppConfig = {
   googleServiceAccountEmail: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL?.trim() || '',
   googlePrivateKey: formatPrivateKey(process.env.GOOGLE_PRIVATE_KEY),
   adminTelegramId: process.env.ADMIN_TELEGRAM_ID?.trim() || '',
-  upiId: process.env.UPI_ID?.trim() || 'coursebazar@upi',
-  payeeName: process.env.PAYEE_NAME?.trim() || 'Course Bazar',
-  supportUsername: process.env.SUPPORT_USERNAME?.trim() || '@coursebazar_support',
+  upiId: process.env.UPI_ID?.trim() || '7014180967@fam',
+  payeeName: process.env.PAYEE_NAME?.trim() || 'Harsh',
+  supportUsername: process.env.SUPPORT_USERNAME?.trim() || '@kanumeena18',
   qrImagePath: resolveQrPath(process.env.QR_IMAGE_PATH),
   paymentExpiryHours: Number(process.env.PAYMENT_EXPIRY_HOURS) || 24,
   storeName: process.env.STORE_NAME?.trim() || 'Course Bazar',
-  currency: process.env.CURRENCY?.trim() || '₹',
+  currency: process.env.CURRENCY?.trim() || 'INR',
   port: Number(process.env.PORT) || 3000,
   get isGoogleConfigured() {
     return Boolean(this.googleSheetId && this.googleServiceAccountEmail && this.googlePrivateKey);

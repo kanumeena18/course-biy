@@ -5,6 +5,7 @@ import { createServer as createViteServer } from 'vite';
 import { config } from './src/config/config.js';
 import { googleSheetsService } from './src/services/googleSheets.js';
 import { startTelegramBot, stopTelegramBot, getBotStatus } from './src/bot/bot.js';
+import { systemLogger } from './src/services/logger.js';
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
@@ -12,6 +13,27 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 app.use(express.json());
 
 // API Routes
+app.get('/api/logs', (req, res) => {
+  try {
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
+    const logs = systemLogger.getRecentLogs(limit);
+    res.json({ success: true, count: logs.length, logs });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message, logs: [] });
+  }
+});
+
+app.delete('/api/logs', (req, res) => {
+  systemLogger.clear();
+  res.json({ success: true, message: 'Logs cleared successfully' });
+});
+
+app.delete('/api/logs/:id', (req, res) => {
+  const { id } = req.params;
+  systemLogger.deleteLog(id);
+  res.json({ success: true, message: `Log ${id} deleted successfully` });
+});
+
 app.get('/api/status', (req, res) => {
   const botStatus = getBotStatus();
   const sheetsStatus = googleSheetsService.getStatus();
@@ -232,6 +254,34 @@ app.post('/api/admin-action', async (req, res) => {
   }
 });
 
+app.post('/api/sheets-reconnect', async (req, res) => {
+  try {
+    const { sheetId } = req.body || {};
+    const result = await googleSheetsService.reconnect(sheetId);
+    if (result.success) {
+      systemLogger.log({
+        level: 'info',
+        category: 'sheets',
+        message: 'Google Sheets reconnected successfully to ' + (sheetId || config.googleSheetId),
+        details: result.message
+      });
+    }
+    res.json(result);
+  } catch (err: any) {
+    systemLogger.log({
+      level: 'error',
+      category: 'sheets',
+      message: 'Google Sheets reconnection request failed: ' + err.message,
+      details: err.stack || err.message
+    });
+    res.status(500).json({
+      success: false,
+      message: err.message,
+      status: googleSheetsService.getStatus()
+    });
+  }
+});
+
 app.post('/api/bot-toggle', async (req, res) => {
   try {
     const { action } = req.body;
@@ -253,6 +303,14 @@ if (config.isBotConfigured) {
     console.warn('Could not auto-start bot on boot:', e.message);
   });
 }
+
+// Graceful cleanup on process termination to prevent 409 getUpdates conflicts
+const handleShutdown = () => {
+  console.log('🛑 [Shutdown] Releasing Telegram Bot polling session...');
+  stopTelegramBot();
+};
+process.once('SIGINT', handleShutdown);
+process.once('SIGTERM', handleShutdown);
 
 async function startServer() {
   const isProduction = process.env.NODE_ENV === 'production';

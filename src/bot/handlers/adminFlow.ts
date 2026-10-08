@@ -124,7 +124,7 @@ export async function handleAdminReject(ctx: Context, userId: string, courseId: 
 
     // Notify customer politely
     try {
-      const supportUsername = await googleSheetsService.getSetting('SUPPORT_USERNAME', '@coursebazar_support');
+      const supportUsername = await googleSheetsService.getSetting('SUPPORT_USERNAME', '@kanumeena18');
       await ctx.telegram.sendMessage(
         userId,
         messages.paymentRejectedCustomer(courseName, supportUsername),

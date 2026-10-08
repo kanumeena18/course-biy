@@ -9,7 +9,11 @@ export async function handleStart(ctx: Context) {
     sessionManager.reset(ctx.from.id);
   }
   try {
-    const text = messages.welcome();
+    const welcomeSetting = await googleSheetsService.getSetting(
+      'WELCOME_MESSAGE',
+      'Find your course, make the payment using UPI, and receive your course.'
+    );
+    const text = messages.welcome(welcomeSetting);
     await ctx.reply(text, {
       parse_mode: 'HTML',
       ...keyboards.mainMenu()

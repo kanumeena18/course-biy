@@ -143,6 +143,24 @@ export async function handleUserText(ctx: Context) {
   );
 }
 
+let cachedQrFileId: string | null = null;
+
+function withFastTimeout<T>(promise: Promise<T>, ms = 2200): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Photo timeout')), ms);
+    promise.then(
+      (res) => {
+        clearTimeout(timer);
+        resolve(res);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
+
 export async function sendCourseCard(ctx: Context, course: Course, prefixText = '') {
   const cardText = prefixText + messages.courseCard(course);
   const kb = keyboards.courseDetails(course.courseId);
@@ -153,32 +171,36 @@ export async function sendCourseCard(ctx: Context, course: Course, prefixText = 
     // 1. If it's a web URL (http:// or https://)
     if (/^https?:\/\//i.test(thumb)) {
       try {
-        await ctx.replyWithPhoto(thumb, {
-          caption: cardText,
-          parse_mode: 'HTML',
-          ...kb
-        });
+        await withFastTimeout(
+          ctx.replyWithPhoto(thumb, {
+            caption: cardText,
+            parse_mode: 'HTML',
+            ...kb
+          })
+        );
         return;
       } catch (err: any) {
-        console.warn(`⚠️ [Thumbnail send notice for ${course.courseId}]: ${err.message}. Falling back to clean text card.`);
+        console.warn(`⚡ [Fast fallback for ${course.courseId}]: ${err.message}. Sending instant text card.`);
       }
     }
     // 2. If it's a local file path
     else if (fs.existsSync(thumb)) {
       try {
-        await ctx.replyWithPhoto({ source: thumb }, {
-          caption: cardText,
-          parse_mode: 'HTML',
-          ...kb
-        });
+        await withFastTimeout(
+          ctx.replyWithPhoto({ source: thumb }, {
+            caption: cardText,
+            parse_mode: 'HTML',
+            ...kb
+          })
+        );
         return;
       } catch (err: any) {
-        console.warn(`⚠️ [Local thumbnail send notice for ${course.courseId}]: ${err.message}. Falling back to clean text card.`);
+        console.warn(`⚡ [Fast fallback for ${course.courseId}]: ${err.message}. Sending instant text card.`);
       }
     }
   }
 
-  // 3. Fallback: clean text card without image
+  // 3. Ultra-fast fallback: clean text card without image (< 10ms)
   await ctx.reply(cardText, {
     parse_mode: 'HTML',
     ...kb
@@ -226,14 +248,31 @@ export async function handleBuyNow(ctx: Context, courseId: string) {
 
     const paymentText = messages.paymentCard(course, upiId, payeeName);
 
-    // Check QR image existence
-    if (config.qrImagePath && fs.existsSync(config.qrImagePath)) {
+    // 1. Try sending cached QR file_id directly for instant response (< 50ms)
+    if (cachedQrFileId) {
       try {
-        await ctx.replyWithPhoto({ source: config.qrImagePath }, {
+        await ctx.replyWithPhoto(cachedQrFileId, {
           caption: paymentText,
           parse_mode: 'HTML',
           ...keyboards.paymentStep(course.courseId)
         });
+        return;
+      } catch (cachedErr) {
+        cachedQrFileId = null; // Invalidate if expired
+      }
+    }
+
+    // 2. If not cached yet, upload QR asset once and save file_id
+    if (config.qrImagePath && fs.existsSync(config.qrImagePath)) {
+      try {
+        const sentMsg = await ctx.replyWithPhoto({ source: config.qrImagePath }, {
+          caption: paymentText,
+          parse_mode: 'HTML',
+          ...keyboards.paymentStep(course.courseId)
+        });
+        if (sentMsg && 'photo' in sentMsg && Array.isArray(sentMsg.photo) && sentMsg.photo.length > 0) {
+          cachedQrFileId = sentMsg.photo[sentMsg.photo.length - 1]?.file_id || null;
+        }
         return;
       } catch (err) {
         console.warn('⚠️ QR image send fallback to text card:', (err as Error).message);

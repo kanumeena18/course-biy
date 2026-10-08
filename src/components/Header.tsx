@@ -41,7 +41,7 @@ export const Header: React.FC<HeaderProps> = ({
   const { title, subtitle } = getPageTitle();
 
   return (
-    <header className="h-16 bg-white/95 border-b border-slate-200/90 sticky top-0 z-30 backdrop-blur-md px-4 sm:px-8 flex items-center justify-between">
+    <header className="h-16 bg-[#fdfbf6]/95 border-b border-[#ece4d4] sticky top-0 z-30 backdrop-blur-md px-4 sm:px-8 flex items-center justify-between">
       {/* Left: Mobile Toggle & Page Title */}
       <div className="flex items-center space-x-3 sm:space-x-4">
         <button

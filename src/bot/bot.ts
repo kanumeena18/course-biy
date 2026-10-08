@@ -27,6 +27,7 @@ import {
 } from './handlers/adminFlow.js';
 import { googleSheetsService } from '../services/googleSheets.js';
 import { keyboards } from './keyboards/inline.js';
+import { systemLogger } from '../services/logger.js';
 
 // Global Process Protections against unhandled crashes
 process.on('unhandledRejection', (reason: any) => {
@@ -70,7 +71,14 @@ export function createBot(token = config.botToken): Telegraf<Context> | null {
 
   // Global Error Handler
   bot.catch((err: any, ctx: Context) => {
-    console.error(`❌ [Telegraf Error Handler] Update ${ctx.updateType}:`, err.message || err);
+    const msg = err.message || String(err);
+    console.error(`❌ [Telegraf Error Handler] Update ${ctx.updateType}:`, msg);
+    systemLogger.log({
+      level: 'error',
+      category: 'bot',
+      message: `Telegraf Error on update ${ctx.updateType}`,
+      details: msg
+    });
   });
 
   // 2. Commands (Non-blocking, auto-reset state)
@@ -155,6 +163,7 @@ export function createBot(token = config.botToken): Telegraf<Context> | null {
 
   // Admin Approval Action: admin_approve_{userId}_{courseId}
   bot.action(/^admin_approve_([a-zA-Z0-9_-]+)_([a-zA-Z0-9_-]+)$/, async (ctx) => {
+    ctx.answerCbQuery('Processing approval...').catch(() => {});
     const userId = ctx.match[1];
     const courseId = ctx.match[2];
     await handleAdminApprove(ctx, userId, courseId);
@@ -162,6 +171,7 @@ export function createBot(token = config.botToken): Telegraf<Context> | null {
 
   // Admin Rejection Action: admin_reject_{userId}_{courseId}
   bot.action(/^admin_reject_([a-zA-Z0-9_-]+)_([a-zA-Z0-9_-]+)$/, async (ctx) => {
+    ctx.answerCbQuery('Processing rejection...').catch(() => {});
     const userId = ctx.match[1];
     const courseId = ctx.match[2];
     await handleAdminReject(ctx, userId, courseId);
@@ -285,11 +295,23 @@ export async function startTelegramBot(token = config.botToken): Promise<{ succe
       }
     }).catch((pollErr: any) => {
       const errorMsg = pollErr?.message || String(pollErr);
-      console.warn('⚠️ [Telegram Bot Polling Error]:', errorMsg);
+      const is409 = pollErr?.response?.error_code === 409 || errorMsg.includes('409') || errorMsg.toLowerCase().includes('conflict');
+      if (is409) {
+        console.warn('⚠️ [Telegram Bot Polling Conflict]: Terminated by other getUpdates request. Only one instance can poll Telegram API.');
+        lastBotError = '409 Conflict: Another bot instance or session is polling with this token. Polling stopped to avoid conflict.';
+      } else {
+        console.warn('⚠️ [Telegram Bot Polling Error]:', errorMsg);
+        lastBotError = errorMsg;
+      }
+      systemLogger.log({
+        level: 'error',
+        category: 'bot',
+        message: is409 ? 'Telegram Bot Polling Conflict (409)' : 'Telegram Bot Polling Error',
+        details: errorMsg
+      });
       if (runningBotInstance === bot) {
         isBotRunning = false;
         runningBotInstance = null;
-        lastBotError = errorMsg;
       }
     });
 
@@ -342,6 +364,13 @@ export async function startTelegramBot(token = config.botToken): Promise<{ succe
 
     lastBotError = errorMsg;
     console.warn('⚠️ [Telegram Bot Launch Notice]:', errorMsg);
+
+    systemLogger.log({
+      level: 'error',
+      category: 'bot',
+      message: is401 ? 'Telegram Bot 401 Unauthorized' : is409 ? 'Telegram Bot 409 Conflict' : 'Telegram Bot Launch Error',
+      details: errorMsg
+    });
 
     // Schedule safe retry ONLY for transient network disconnects
     const isTransientNetworkError =

@@ -1,0 +1,8 @@
+{
+  "name": "Course Bazar - Telegram Course Selling Bot 2",
+  "description": "Professional Telegram bot system using Google Sheets as a database for selling password-protected digital courses with manual UPI verification.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

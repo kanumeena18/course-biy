@@ -1,0 +1,59 @@
+import dotenv from 'dotenv';
+import path from 'path';
+import fs from 'fs';
+
+// Load .env if present
+dotenv.config();
+
+export interface AppConfig {
+  botToken: string;
+  googleSheetId: string;
+  googleServiceAccountEmail: string;
+  googlePrivateKey: string;
+  adminTelegramId: string;
+  upiId: string;
+  payeeName: string;
+  supportUsername: string;
+  qrImagePath: string;
+  paymentExpiryHours: number;
+  storeName: string;
+  currency: string;
+  port: number;
+  isGoogleConfigured: boolean;
+  isBotConfigured: boolean;
+}
+
+const formatPrivateKey = (key?: string): string => {
+  if (!key) return '';
+  return key.replace(/\\n/g, '\n');
+};
+
+const resolveQrPath = (customPath?: string): string => {
+  if (customPath && fs.existsSync(customPath)) {
+    return customPath;
+  }
+  const defaultAsset = path.resolve(process.cwd(), 'assets', 'qr-code.png');
+  return defaultAsset;
+};
+
+export const config: AppConfig = {
+  botToken: process.env.BOT_TOKEN?.trim() || '',
+  googleSheetId: process.env.GOOGLE_SHEET_ID?.trim() || '',
+  googleServiceAccountEmail: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL?.trim() || '',
+  googlePrivateKey: formatPrivateKey(process.env.GOOGLE_PRIVATE_KEY),
+  adminTelegramId: process.env.ADMIN_TELEGRAM_ID?.trim() || '',
+  upiId: process.env.UPI_ID?.trim() || 'coursebazar@upi',
+  payeeName: process.env.PAYEE_NAME?.trim() || 'Course Bazar',
+  supportUsername: process.env.SUPPORT_USERNAME?.trim() || '@coursebazar_support',
+  qrImagePath: resolveQrPath(process.env.QR_IMAGE_PATH),
+  paymentExpiryHours: Number(process.env.PAYMENT_EXPIRY_HOURS) || 24,
+  storeName: process.env.STORE_NAME?.trim() || 'Course Bazar',
+  currency: process.env.CURRENCY?.trim() || '₹',
+  port: Number(process.env.PORT) || 3000,
+  get isGoogleConfigured() {
+    return Boolean(this.googleSheetId && this.googleServiceAccountEmail && this.googlePrivateKey);
+  },
+  get isBotConfigured() {
+    return Boolean(this.botToken && this.botToken.includes(':'));
+  }
+};

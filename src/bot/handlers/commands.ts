@@ -64,7 +64,7 @@ export async function handleCourses(ctx: Context) {
   try {
     const activeCourses = await googleSheetsService.getCourses(true);
     if (activeCourses.length === 0) {
-      await ctx.reply('📚 No courses are currently available. Please check back soon!', keyboards.mainMenu());
+      await ctx.reply('📚 No courses are available right now. Please check back later.', keyboards.mainMenu());
       return;
     }
     await ctx.reply(

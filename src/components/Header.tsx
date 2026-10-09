@@ -41,22 +41,22 @@ export const Header: React.FC<HeaderProps> = ({
   const { title, subtitle } = getPageTitle();
 
   return (
-    <header className="h-16 bg-[#fdfbf6]/95 border-b border-[#ece4d4] sticky top-0 z-30 backdrop-blur-md px-4 sm:px-8 flex items-center justify-between">
+    <header className="h-16 bg-[#0B0D1F]/95 border-b border-[#252A3D] sticky top-0 z-30 backdrop-blur-md px-4 sm:px-8 flex items-center justify-between">
       {/* Left: Mobile Toggle & Page Title */}
       <div className="flex items-center space-x-3 sm:space-x-4">
         <button
           onClick={onOpenMobileSidebar}
-          className="lg:hidden p-2 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition"
+          className="lg:hidden p-2 rounded-xl text-[#9CA3AF] hover:text-[#F8FAFC] hover:bg-[#1A1D32] transition"
           aria-label="Open sidebar"
         >
           <Menu className="w-5 h-5" />
         </button>
 
         <div>
-          <h1 className="text-sm sm:text-base font-bold text-slate-900 leading-tight">
+          <h1 className="text-sm sm:text-base font-bold text-[#F8FAFC] leading-tight">
             {title}
           </h1>
-          <p className="text-[11px] text-slate-500 hidden sm:block leading-tight">
+          <p className="text-[11px] text-[#9CA3AF] hidden sm:block leading-tight">
             {subtitle}
           </p>
         </div>
@@ -65,16 +65,16 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Right: Quick Indicators & Primary Action */}
       <div className="flex items-center space-x-2.5">
         {/* UPI Info Pill */}
-        <div className="hidden md:flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs">
-          <QrCode className="w-3.5 h-3.5 text-blue-600" />
-          <span className="text-slate-500">UPI:</span>
-          <code className="text-slate-800 font-bold font-mono text-[11px]">{config.upiId}</code>
+        <div className="hidden md:flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-[#111426] border border-[#252A3D] text-xs">
+          <QrCode className="w-3.5 h-3.5 text-[#6366F1]" />
+          <span className="text-[#9CA3AF]">UPI:</span>
+          <code className="text-[#F8FAFC] font-bold font-mono text-[11px]">{config.upiId}</code>
         </div>
 
         {/* Refresh Button */}
         <button
           onClick={onRefreshData}
-          className="p-2 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 border border-transparent hover:border-slate-200 transition"
+          className="p-2 rounded-xl text-[#9CA3AF] hover:text-[#F8FAFC] hover:bg-[#1A1D32] border border-transparent hover:border-[#252A3D] transition"
           title="Refresh database data"
         >
           <RefreshCw className="w-4 h-4" />
@@ -83,7 +83,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Add Course Primary Button */}
         <button
           onClick={onOpenAddCourse}
-          className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition shadow-xs hover:shadow-sm"
+          className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-[#6366F1] hover:bg-[#4F46E5] text-white text-xs font-bold transition shadow-md shadow-[#6366F1]/20"
         >
           <Plus className="w-4 h-4" />
           <span>Add Course</span>

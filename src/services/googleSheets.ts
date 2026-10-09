@@ -19,10 +19,32 @@ const DEFAULT_SETTINGS: SettingItem[] = [
 ];
 
 const DEFAULT_ADMINS: AdminUser[] = [
-  { telegramId: config.adminTelegramId || '123456789', name: 'Store Owner', role: 'Owner', status: 'Active' }
+  {
+    adminId: 'ADM-1',
+    telegramId: config.adminTelegramId || '8293894004',
+    name: config.payeeName || 'Store Owner',
+    username: config.supportUsername ? config.supportUsername.replace('@', '') : 'owner',
+    role: 'Owner',
+    status: 'Active',
+    addedBy: 'System',
+    createdAt: '2026-10-01',
+    updatedAt: '2026-10-01'
+  }
 ];
 
 const DEFAULT_PURCHASES: Purchase[] = [];
+
+// Durable In-Memory Mutex Lock for atomic, race-condition-free payment processing
+class AsyncLock {
+  private queue = Promise.resolve();
+
+  acquire<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.queue.then(fn, fn);
+    this.queue = next.then(() => {}, () => {});
+    return next;
+  }
+}
+const globalPaymentLock = new AsyncLock();
 
 // Helper to wrap any promise in a strict timeout
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operationName: string): Promise<T> {
@@ -154,17 +176,21 @@ export class GoogleSheetsService {
       {
         title: 'Purchases',
         headers: [
-          'Telegram User ID',
-          'Telegram Username',
+          'Payment ID',
+          'Customer Telegram ID',
           'Customer Name',
           'Course ID',
           'Course Name',
           'Amount',
-          'Payment Screenshot File ID',
-          'Status',
-          'Created At',
-          'Approved At',
-          'Approved By'
+          'Payment Screenshot Reference',
+          'Submitted At',
+          'Payment Status',
+          'Processed By Admin ID',
+          'Processed By Admin Name',
+          'Decision',
+          'Decision Timestamp',
+          'Rejection Reason',
+          'Access Delivery Status'
         ]
       },
       {
@@ -173,7 +199,17 @@ export class GoogleSheetsService {
       },
       {
         title: 'Admins',
-        headers: ['Telegram ID', 'Name', 'Role', 'Status']
+        headers: [
+          'Admin ID',
+          'Admin Name',
+          'Telegram User ID',
+          'Telegram Username',
+          'Role',
+          'Status',
+          'Added By',
+          'Created At',
+          'Updated At'
+        ]
       }
     ];
 
@@ -395,7 +431,7 @@ export class GoogleSheetsService {
   }
 
   // ==========================================
-  // PURCHASES (NO Order ID, NO UTR, NO Transaction ID!)
+  // PURCHASES (Multi-Admin First-Valid-Action-Wins)
   // ==========================================
   private async refreshPurchasesFromGoogle(): Promise<void> {
     if (!this.isConnected || !this.sheetsClient || !config.googleSheetId || this.isFetchingPurchases) {
@@ -406,25 +442,62 @@ export class GoogleSheetsService {
     try {
       const fetchPromise = this.sheetsClient.spreadsheets.values.get({
         spreadsheetId: config.googleSheetId,
-        range: 'Purchases!A2:K'
+        range: 'Purchases!A2:O'
       });
 
       const response = await withTimeout(fetchPromise, this.API_TIMEOUT, 'fetchPurchasesFromGoogle');
       const rows = response.data.values || [];
 
-      const fetchedPurchases: Purchase[] = rows.map((row) => ({
-        telegramUserId: String(row[0] || '').trim(),
-        telegramUsername: String(row[1] || '').trim(),
-        customerName: String(row[2] || '').trim(),
-        courseId: String(row[3] || '').trim(),
-        courseName: String(row[4] || '').trim(),
-        amount: Number(row[5]) || 0,
-        paymentScreenshotFileId: String(row[6] || '').trim(),
-        status: (String(row[7] || 'PAYMENT_PENDING').trim() as PurchaseStatus),
-        createdAt: String(row[8] || '').trim(),
-        approvedAt: row[9] ? String(row[9]).trim() : undefined,
-        approvedBy: row[10] ? String(row[10]).trim() : undefined
-      })).filter(p => p.telegramUserId && p.courseId);
+      const fetchedPurchases: Purchase[] = rows.map((row, i) => {
+        const isNewFormat = String(row[0] || '').startsWith('PAY-') || row.length >= 12;
+        if (isNewFormat) {
+          const rawStatus = String(row[8] || 'PAYMENT_PENDING').trim();
+          let normalizedStatus: PurchaseStatus = 'PAYMENT_PENDING';
+          if (rawStatus === 'Approved' || rawStatus === 'PAID') normalizedStatus = 'PAID';
+          else if (rawStatus === 'Rejected' || rawStatus === 'REJECTED') normalizedStatus = 'REJECTED';
+          else if (rawStatus === 'PAYMENT_SUBMITTED') normalizedStatus = 'PAYMENT_SUBMITTED';
+
+          return {
+            paymentId: String(row[0] || `PAY-${i + 1}`).trim(),
+            telegramUserId: String(row[1] || '').trim(),
+            customerName: String(row[2] || '').trim(),
+            telegramUsername: '',
+            courseId: String(row[3] || '').trim(),
+            courseName: String(row[4] || '').trim(),
+            amount: Number(row[5]) || 0,
+            paymentScreenshotFileId: String(row[6] || '').trim(),
+            createdAt: String(row[7] || '').trim(),
+            submittedAt: String(row[7] || '').trim(),
+            status: normalizedStatus,
+            processedByAdminId: row[9] ? String(row[9]).trim() : undefined,
+            processedByAdminName: row[10] ? String(row[10]).trim() : undefined,
+            decision: (row[11] === 'Approved' || row[11] === 'Rejected') ? (row[11] as any) : undefined,
+            decisionTimestamp: row[12] ? String(row[12]).trim() : undefined,
+            rejectionReason: row[13] ? String(row[13]).trim() : undefined,
+            accessDeliveryStatus: row[14] ? (String(row[14]).trim() as any) : undefined,
+            approvedAt: row[12] ? String(row[12]).trim() : undefined,
+            approvedBy: row[9] ? String(row[9]).trim() : undefined
+          };
+        }
+
+        // Legacy format
+        return {
+          paymentId: `PAY-${String(row[0] || '')}-${String(row[3] || '')}`,
+          telegramUserId: String(row[0] || '').trim(),
+          telegramUsername: String(row[1] || '').trim(),
+          customerName: String(row[2] || '').trim(),
+          courseId: String(row[3] || '').trim(),
+          courseName: String(row[4] || '').trim(),
+          amount: Number(row[5]) || 0,
+          paymentScreenshotFileId: String(row[6] || '').trim(),
+          status: (String(row[7] || 'PAYMENT_PENDING').trim() as PurchaseStatus),
+          createdAt: String(row[8] || '').trim(),
+          submittedAt: String(row[8] || '').trim(),
+          approvedAt: row[9] ? String(row[9]).trim() : undefined,
+          approvedBy: row[10] ? String(row[10]).trim() : undefined,
+          processedByAdminId: row[10] ? String(row[10]).trim() : undefined
+        };
+      }).filter(p => p.telegramUserId && p.courseId);
 
       if (fetchedPurchases.length > 0) {
         this.purchasesCache = fetchedPurchases;
@@ -456,14 +529,21 @@ export class GoogleSheetsService {
     return all.filter(p => p.status === 'PAYMENT_SUBMITTED');
   }
 
-  public async getPurchaseByUserAndCourse(userId: string, courseId: string): Promise<Purchase | null> {
-    const purchases = await this.getPurchases(userId);
-    const matching = purchases.filter(p => p.courseId.toLowerCase() === courseId.toLowerCase());
+  public async getPurchaseByUserAndCourse(userId: string, courseId: string, paymentId?: string): Promise<Purchase | null> {
+    const purchases = await this.getPurchases();
+    if (paymentId) {
+      const found = purchases.find(p => p.paymentId === paymentId);
+      if (found) return found;
+    }
+    const matching = purchases.filter(
+      p => p.telegramUserId === String(userId) && p.courseId.toLowerCase() === courseId.toLowerCase()
+    );
     if (matching.length === 0) return null;
     return matching[matching.length - 1];
   }
 
   public async recordPurchaseSubmission(purchase: {
+    paymentId?: string;
     telegramUserId: string;
     telegramUsername: string;
     customerName: string;
@@ -471,24 +551,32 @@ export class GoogleSheetsService {
     courseName: string;
     amount: number;
     paymentScreenshotFileId: string;
+    adminNotificationMessageIds?: Array<{ adminId: string; chatId: string; messageId: number }>;
   }): Promise<Purchase> {
+    const uniquePaymentId = purchase.paymentId || `PAY-${Date.now().toString(36).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
+    const now = new Date().toISOString();
+
     const newRecord: Purchase = {
+      paymentId: uniquePaymentId,
       telegramUserId: String(purchase.telegramUserId),
       telegramUsername: purchase.telegramUsername || '',
-      customerName: purchase.customerName || '',
+      customerName: purchase.customerName || 'Customer',
       courseId: purchase.courseId,
       courseName: purchase.courseName,
       amount: purchase.amount,
       paymentScreenshotFileId: purchase.paymentScreenshotFileId,
       status: 'PAYMENT_SUBMITTED',
-      createdAt: new Date().toISOString()
+      createdAt: now,
+      submittedAt: now,
+      adminNotificationMessageIds: purchase.adminNotificationMessageIds || []
     };
 
     // Instant Write-Through in memory (0ms lag!)
     const existingIndex = this.purchasesCache.findIndex(
-      p => p.telegramUserId === newRecord.telegramUserId &&
-           p.courseId === newRecord.courseId &&
-           (p.status === 'PAYMENT_PENDING' || p.status === 'PAYMENT_SUBMITTED')
+      p => (p.paymentId && p.paymentId === uniquePaymentId) ||
+           (p.telegramUserId === newRecord.telegramUserId &&
+            p.courseId.toLowerCase() === newRecord.courseId.toLowerCase() &&
+            (p.status === 'PAYMENT_PENDING' || p.status === 'PAYMENT_SUBMITTED'))
     );
 
     if (existingIndex >= 0) {
@@ -503,23 +591,27 @@ export class GoogleSheetsService {
     // Non-blocking write to Google Sheet with timeout
     if (this.isConnected && this.sheetsClient && config.googleSheetId) {
       const rowValues = [
+        newRecord.paymentId,
         newRecord.telegramUserId,
-        newRecord.telegramUsername,
         newRecord.customerName,
         newRecord.courseId,
         newRecord.courseName,
         newRecord.amount,
         newRecord.paymentScreenshotFileId,
-        newRecord.status,
         newRecord.createdAt,
-        newRecord.approvedAt || '',
-        newRecord.approvedBy || ''
+        newRecord.status,
+        '', // Processed By Admin ID
+        '', // Processed By Admin Name
+        'Pending', // Decision
+        '', // Decision Timestamp
+        '', // Rejection Reason
+        'Pending' // Access Delivery Status
       ];
 
       withTimeout(
         this.sheetsClient.spreadsheets.values.append({
           spreadsheetId: config.googleSheetId,
-          range: 'Purchases!A:K',
+          range: 'Purchases!A:O',
           valueInputOption: 'USER_ENTERED',
           requestBody: { values: [rowValues] }
         }),
@@ -533,86 +625,203 @@ export class GoogleSheetsService {
     return newRecord;
   }
 
+  public setPurchaseNotificationIds(
+    userId: string,
+    courseId: string,
+    notifications: Array<{ adminId: string; chatId: string; messageId: number }>,
+    paymentId?: string
+  ) {
+    const idx = this.purchasesCache.findIndex(
+      p => (paymentId && p.paymentId === paymentId) ||
+           (p.telegramUserId === String(userId) && p.courseId.toLowerCase() === courseId.toLowerCase())
+    );
+    if (idx >= 0) {
+      this.purchasesCache[idx].adminNotificationMessageIds = notifications;
+    }
+  }
+
+  // ATOMIC FIRST-VALID-ACTION-WINS PAYMENT DECISION
+  public async processPaymentDecision(params: {
+    userId: string;
+    courseId: string;
+    paymentId?: string;
+    action: 'APPROVE' | 'REJECT';
+    adminId: string;
+    adminName?: string;
+    rejectionReason?: string;
+  }): Promise<{
+    success: boolean;
+    alreadyProcessed?: boolean;
+    error?: string;
+    purchase?: Purchase;
+    delivery?: { driveLink?: string; zipPassword?: string; courseName?: string };
+  }> {
+    return globalPaymentLock.acquire(async () => {
+      const adminId = String(params.adminId || '').trim();
+      const isAuth = await this.isAdmin(adminId);
+      if (!isAuth) {
+        return {
+          success: false,
+          error: 'Unauthorized: Only registered active admins can process payments.'
+        };
+      }
+
+      const uid = String(params.userId).trim();
+      const cid = String(params.courseId).trim().toLowerCase();
+      const pid = params.paymentId?.trim();
+
+      // Find the purchase record
+      let targetIndex = -1;
+      if (pid) {
+        targetIndex = this.purchasesCache.findIndex(p => p.paymentId === pid);
+      }
+      if (targetIndex < 0) {
+        targetIndex = this.purchasesCache.findIndex(
+          p => p.telegramUserId === uid && p.courseId.toLowerCase() === cid
+        );
+      }
+
+      if (targetIndex < 0) {
+        return {
+          success: false,
+          error: 'Payment verification record not found in database.'
+        };
+      }
+
+      const currentPurchase = this.purchasesCache[targetIndex];
+
+      // CRITICAL FIRST VALID ACTION WINS CHECK:
+      // If already resolved, reject immediately!
+      if (currentPurchase.status === 'PAID' || currentPurchase.status === 'REJECTED') {
+        const handlerName = currentPurchase.processedByAdminName || currentPurchase.processedByAdminId || currentPurchase.approvedBy || 'another admin';
+        return {
+          success: false,
+          alreadyProcessed: true,
+          error: `This payment has already been processed by ${handlerName}.`,
+          purchase: currentPurchase
+        };
+      }
+
+      // Commit the decision atomically
+      const now = new Date().toISOString();
+      const newStatus: PurchaseStatus = params.action === 'APPROVE' ? 'PAID' : 'REJECTED';
+      const decisionText = params.action === 'APPROVE' ? 'Approved' : 'Rejected';
+
+      const adminUser = this.adminsCache.find(a => a.telegramId === adminId);
+      const resolvedAdminName = params.adminName || adminUser?.name || `Admin (${adminId})`;
+
+      const updated: Purchase = {
+        ...currentPurchase,
+        status: newStatus,
+        decision: decisionText,
+        decisionTimestamp: now,
+        processedByAdminId: adminId,
+        processedByAdminName: resolvedAdminName,
+        approvedAt: now,
+        approvedBy: adminId,
+        rejectionReason: params.action === 'REJECT' ? (params.rejectionReason || 'Payment could not be verified') : undefined,
+        accessDeliveryStatus: params.action === 'APPROVE' ? 'Delivered' : undefined
+      };
+
+      this.purchasesCache[targetIndex] = updated;
+
+      // Sync with Google Sheets asynchronously
+      if (this.isConnected && this.sheetsClient && config.googleSheetId) {
+        const sheets = this.sheetsClient;
+        const sheetId = config.googleSheetId;
+
+        (async () => {
+          try {
+            const res = await withTimeout(
+              sheets.spreadsheets.values.get({
+                spreadsheetId: sheetId,
+                range: 'Purchases!A2:O'
+              }),
+              this.API_TIMEOUT,
+              'findPurchaseRowForDecision'
+            );
+            const rows = res.data.values || [];
+            for (let i = 0; i < rows.length; i++) {
+              const rowPid = String(rows[i][0] || '').trim();
+              const rowUid = String(rows[i][1] || rows[i][0] || '').trim();
+              const rowCid = String(rows[i][3] || '').trim().toLowerCase();
+
+              const matches = (pid && rowPid === pid) || (rowUid === uid && rowCid === cid);
+              if (matches) {
+                const rowIndex = i + 2;
+                await withTimeout(
+                  sheets.spreadsheets.values.update({
+                    spreadsheetId: sheetId,
+                    range: `Purchases!A${rowIndex}:O${rowIndex}`,
+                    valueInputOption: 'USER_ENTERED',
+                    requestBody: {
+                      values: [[
+                        updated.paymentId || rowPid || `PAY-${rowIndex - 1}`,
+                        updated.telegramUserId,
+                        updated.customerName,
+                        updated.courseId,
+                        updated.courseName,
+                        updated.amount,
+                        updated.paymentScreenshotFileId,
+                        updated.createdAt,
+                        updated.status,
+                        updated.processedByAdminId || adminId,
+                        updated.processedByAdminName || resolvedAdminName,
+                        updated.decision || decisionText,
+                        updated.decisionTimestamp || now,
+                        updated.rejectionReason || '',
+                        updated.accessDeliveryStatus || ''
+                      ]]
+                    }
+                  }),
+                  this.API_TIMEOUT,
+                  'updatePurchaseDecisionInGoogle'
+                );
+                break;
+              }
+            }
+          } catch (err: any) {
+            this.handleGoogleApiError('Non-blocking purchase decision sync', err);
+          }
+        })().catch(() => {});
+      }
+
+      let deliveryPayload = undefined;
+      if (params.action === 'APPROVE') {
+        const course = await this.getCourseById(currentPurchase.courseId);
+        deliveryPayload = {
+          driveLink: course?.driveLink,
+          zipPassword: course?.zipPassword,
+          courseName: course?.courseName
+        };
+      }
+
+      return {
+        success: true,
+        purchase: updated,
+        delivery: deliveryPayload
+      };
+    });
+  }
+
   public async updatePurchaseStatus(
     userId: string,
     courseId: string,
     newStatus: PurchaseStatus,
     adminTelegramId?: string
   ): Promise<Purchase | null> {
-    const uid = String(userId);
-    const cid = String(courseId).toLowerCase();
-
-    const targetIndex = this.purchasesCache.findIndex(
-      p => p.telegramUserId === uid && p.courseId.toLowerCase() === cid
-    );
-
-    if (targetIndex < 0) return null;
-
-    const now = new Date().toISOString();
-    const updated = {
-      ...this.purchasesCache[targetIndex],
-      status: newStatus,
-      ...(newStatus === 'PAID' ? { approvedAt: now, approvedBy: adminTelegramId } : {}),
-      ...(newStatus === 'REJECTED' ? { approvedAt: now, approvedBy: adminTelegramId } : {})
-    };
-
-    // Instant Write-Through in memory
-    this.purchasesCache[targetIndex] = updated;
-
-    // Asynchronous non-blocking Google Sheet update
-    if (this.isConnected && this.sheetsClient && config.googleSheetId) {
-      const sheets = this.sheetsClient;
-      const sheetId = config.googleSheetId;
-
-      (async () => {
-        try {
-          const response = await withTimeout(
-            sheets.spreadsheets.values.get({
-              spreadsheetId: sheetId,
-              range: 'Purchases!A2:K'
-            }),
-            this.API_TIMEOUT,
-            'findRowForStatusUpdate'
-          );
-
-          const rows = response.data.values || [];
-          for (let i = 0; i < rows.length; i++) {
-            const rowUser = String(rows[i][0] || '').trim();
-            const rowCourse = String(rows[i][3] || '').trim().toLowerCase();
-
-            if (rowUser === uid && rowCourse === cid) {
-              const sheetRowIndex = i + 2;
-              await withTimeout(
-                sheets.spreadsheets.values.update({
-                  spreadsheetId: sheetId,
-                  range: `Purchases!H${sheetRowIndex}:K${sheetRowIndex}`,
-                  valueInputOption: 'USER_ENTERED',
-                  requestBody: {
-                    values: [[
-                      newStatus,
-                      rows[i][8] || now,
-                      updated.approvedAt || '',
-                      updated.approvedBy || ''
-                    ]]
-                  }
-                }),
-                this.API_TIMEOUT,
-                'updateRowStatusInGoogle'
-              );
-              break;
-            }
-          }
-        } catch (err: any) {
-          this.handleGoogleApiError('Non-blocking purchase status sync', err);
-        }
-      })().catch(() => {});
-    }
-
-    return updated;
+    const action = newStatus === 'PAID' ? 'APPROVE' : 'REJECT';
+    const res = await this.processPaymentDecision({
+      userId,
+      courseId,
+      action,
+      adminId: adminTelegramId || config.adminTelegramId || '8293894004'
+    });
+    return res.purchase || null;
   }
 
   // ==========================================
-  // ADMINS & SETTINGS (Cached)
+  // MULTI-ADMIN MANAGEMENT (Synchronized with Google Sheets)
   // ==========================================
   public async getAdmins(): Promise<AdminUser[]> {
     const now = Date.now();
@@ -621,18 +830,37 @@ export class GoogleSheetsService {
       withTimeout(
         this.sheetsClient!.spreadsheets.values.get({
           spreadsheetId: config.googleSheetId,
-          range: 'Admins!A2:D'
+          range: 'Admins!A2:I'
         }),
         this.API_TIMEOUT,
         'fetchAdminsFromGoogle'
       ).then(res => {
         const rows = res.data.values || [];
-        const fetched = rows.map(r => ({
-          telegramId: String(r[0] || '').trim(),
-          name: String(r[1] || '').trim(),
-          role: (String(r[2] || 'Admin').trim() as 'Owner' | 'Admin' | 'Moderator'),
-          status: (String(r[3] || 'Active').trim() as 'Active' | 'Inactive')
-        })).filter(a => a.telegramId);
+        const fetched = rows.map((r, i) => {
+          if (r.length >= 5) {
+            return {
+              adminId: String(r[0] || `ADM-${i + 1}`).trim(),
+              name: String(r[1] || '').trim(),
+              telegramId: String(r[2] || '').trim(),
+              username: String(r[3] || '').trim(),
+              role: (String(r[4] || 'Payment Admin').trim() as any),
+              status: (String(r[5] || 'Active').trim() as 'Active' | 'Inactive'),
+              addedBy: r[6] ? String(r[6]).trim() : 'System',
+              createdAt: r[7] ? String(r[7]).trim() : '2026-10-01',
+              updatedAt: r[8] ? String(r[8]).trim() : undefined
+            };
+          }
+          // Legacy 4-column format
+          return {
+            adminId: `ADM-${i + 1}`,
+            telegramId: String(r[0] || '').trim(),
+            name: String(r[1] || '').trim(),
+            role: (String(r[2] || 'Owner').trim() as any),
+            status: (String(r[3] || 'Active').trim() as 'Active' | 'Inactive'),
+            addedBy: 'System',
+            createdAt: '2026-10-01'
+          };
+        }).filter(a => a.telegramId);
 
         if (fetched.length > 0) {
           this.adminsCache = fetched;
@@ -645,7 +873,248 @@ export class GoogleSheetsService {
       });
     }
 
+    // Guarantee primary owner is present
+    if (config.adminTelegramId) {
+      const hasOwner = this.adminsCache.some(a => a.telegramId === config.adminTelegramId);
+      if (!hasOwner) {
+        this.adminsCache.unshift({
+          adminId: 'ADM-1',
+          telegramId: config.adminTelegramId,
+          name: config.payeeName || 'Store Owner',
+          username: config.supportUsername ? config.supportUsername.replace('@', '') : 'owner',
+          role: 'Owner',
+          status: 'Active',
+          addedBy: 'System',
+          createdAt: '2026-10-01',
+          updatedAt: '2026-10-01'
+        });
+      }
+    }
+
     return this.adminsCache;
+  }
+
+  public async addAdmin(
+    adminData: {
+      name: string;
+      telegramId: string;
+      username?: string;
+      role: AdminRole;
+      status: 'Active' | 'Inactive';
+    },
+    addedBy = 'Owner'
+  ): Promise<AdminUser> {
+    const tid = String(adminData.telegramId).trim();
+    if (!/^\d+$/.test(tid)) {
+      throw new Error('Telegram User ID must be a numeric ID (digits only).');
+    }
+    if (!adminData.name?.trim()) {
+      throw new Error('Admin name is required.');
+    }
+
+    const currentAdmins = await this.getAdmins();
+    const existing = currentAdmins.find(a => a.telegramId === tid);
+    if (existing) {
+      throw new Error(`Admin with Telegram ID "${tid}" already exists (${existing.name}).`);
+    }
+
+    const now = new Date().toISOString().split('T')[0];
+    const newAdmin: AdminUser = {
+      adminId: `ADM-${this.adminsCache.length + 1}`,
+      telegramId: tid,
+      name: adminData.name.trim(),
+      username: adminData.username?.replace('@', '').trim() || '',
+      role: adminData.role || 'Payment Admin',
+      status: adminData.status || 'Active',
+      addedBy,
+      createdAt: now,
+      updatedAt: now
+    };
+
+    this.adminsCache.push(newAdmin);
+
+    // Sync to Google Sheet
+    if (this.isConnected && this.sheetsClient && config.googleSheetId) {
+      const row = [
+        newAdmin.adminId,
+        newAdmin.name,
+        newAdmin.telegramId,
+        newAdmin.username || '',
+        newAdmin.role,
+        newAdmin.status,
+        newAdmin.addedBy || '',
+        newAdmin.createdAt || '',
+        newAdmin.updatedAt || ''
+      ];
+
+      withTimeout(
+        this.sheetsClient.spreadsheets.values.append({
+          spreadsheetId: config.googleSheetId,
+          range: 'Admins!A:I',
+          valueInputOption: 'USER_ENTERED',
+          requestBody: { values: [row] }
+        }),
+        this.API_TIMEOUT,
+        'appendAdminToGoogle'
+      ).catch(err => {
+        this.handleGoogleApiError('Non-blocking append admin', err);
+      });
+    }
+
+    return newAdmin;
+  }
+
+  public async updateAdmin(
+    telegramId: string,
+    updates: Partial<AdminUser>,
+    requestingAdminId?: string
+  ): Promise<AdminUser> {
+    const tid = String(telegramId).trim();
+    await this.getAdmins();
+    const idx = this.adminsCache.findIndex(a => a.telegramId === tid);
+    if (idx < 0) {
+      throw new Error('Admin record not found.');
+    }
+
+    const current = this.adminsCache[idx];
+
+    // Protect primary owner
+    const isPrimaryOwner = (config.adminTelegramId && tid === config.adminTelegramId) ||
+      (current.role === 'Owner' && this.adminsCache.filter(a => a.role === 'Owner').length <= 1);
+
+    if (isPrimaryOwner) {
+      if (updates.status === 'Inactive') {
+        throw new Error('The primary owner account cannot be deactivated.');
+      }
+      if (updates.role && updates.role !== 'Owner') {
+        throw new Error('The primary owner role cannot be changed.');
+      }
+    }
+
+    const now = new Date().toISOString().split('T')[0];
+    const updated: AdminUser = {
+      ...current,
+      ...(updates.name ? { name: updates.name.trim() } : {}),
+      ...(updates.username !== undefined ? { username: updates.username.replace('@', '').trim() } : {}),
+      ...(updates.role ? { role: updates.role } : {}),
+      ...(updates.status ? { status: updates.status } : {}),
+      updatedAt: now
+    };
+
+    this.adminsCache[idx] = updated;
+
+    // Sync to Google Sheet
+    if (this.isConnected && this.sheetsClient && config.googleSheetId) {
+      const sheets = this.sheetsClient;
+      const sheetId = config.googleSheetId;
+
+      (async () => {
+        try {
+          const res = await withTimeout(
+            sheets.spreadsheets.values.get({
+              spreadsheetId: sheetId,
+              range: 'Admins!A2:I'
+            }),
+            this.API_TIMEOUT,
+            'findAdminRowToUpdate'
+          );
+          const rows = res.data.values || [];
+          for (let i = 0; i < rows.length; i++) {
+            const rTid = String(rows[i][2] || rows[i][0] || '').trim();
+            if (rTid === tid) {
+              const rowIndex = i + 2;
+              await withTimeout(
+                sheets.spreadsheets.values.update({
+                  spreadsheetId: sheetId,
+                  range: `Admins!A${rowIndex}:I${rowIndex}`,
+                  valueInputOption: 'USER_ENTERED',
+                  requestBody: {
+                    values: [[
+                      updated.adminId || `ADM-${rowIndex - 1}`,
+                      updated.name,
+                      updated.telegramId,
+                      updated.username || '',
+                      updated.role,
+                      updated.status,
+                      updated.addedBy || '',
+                      updated.createdAt || '',
+                      updated.updatedAt || now
+                    ]]
+                  }
+                }),
+                this.API_TIMEOUT,
+                'updateAdminRowInGoogle'
+              );
+              break;
+            }
+          }
+        } catch (err: any) {
+          this.handleGoogleApiError('Non-blocking admin update sync', err);
+        }
+      })().catch(() => {});
+    }
+
+    return updated;
+  }
+
+  public async deleteAdmin(telegramId: string, requestingAdminId?: string): Promise<boolean> {
+    const tid = String(telegramId).trim();
+    await this.getAdmins();
+    const idx = this.adminsCache.findIndex(a => a.telegramId === tid);
+    if (idx < 0) {
+      throw new Error('Admin record not found.');
+    }
+
+    const current = this.adminsCache[idx];
+
+    // Protect primary owner
+    const isPrimaryOwner = (config.adminTelegramId && tid === config.adminTelegramId) ||
+      (current.role === 'Owner' && this.adminsCache.filter(a => a.role === 'Owner').length <= 1);
+
+    if (isPrimaryOwner) {
+      throw new Error('The primary owner account cannot be removed.');
+    }
+
+    this.adminsCache.splice(idx, 1);
+
+    // Sync to Google Sheet
+    if (this.isConnected && this.sheetsClient && config.googleSheetId) {
+      const sheets = this.sheetsClient;
+      const sheetId = config.googleSheetId;
+
+      (async () => {
+        try {
+          const res = await withTimeout(
+            sheets.spreadsheets.values.get({
+              spreadsheetId: sheetId,
+              range: 'Admins!A2:I'
+            }),
+            this.API_TIMEOUT,
+            'findAdminRowToDelete'
+          );
+          const rows = res.data.values || [];
+          for (let i = 0; i < rows.length; i++) {
+            const rTid = String(rows[i][2] || rows[i][0] || '').trim();
+            if (rTid === tid) {
+              const rowIndex = i + 2;
+              await withTimeout(
+                sheets.spreadsheets.values.clear({
+                  spreadsheetId: sheetId,
+                  range: `Admins!A${rowIndex}:I${rowIndex}`
+                }),
+                this.API_TIMEOUT,
+                'clearAdminRowInGoogle'
+              );
+              break;
+            }
+          }
+        } catch (err: any) {
+          this.handleGoogleApiError('Non-blocking admin delete sync', err);
+        }
+      })().catch(() => {});
+    }
+
+    return true;
   }
 
   public async isAdmin(telegramId: string | number): Promise<boolean> {
@@ -659,6 +1128,38 @@ export class GoogleSheetsService {
 
     const admins = await this.getAdmins();
     return admins.some(a => a.telegramId === tid && a.status.toLowerCase() === 'active');
+  }
+
+  public async isOwner(telegramId: string | number): Promise<boolean> {
+    const tid = String(telegramId).trim();
+    if (!tid) return false;
+    if (config.adminTelegramId && tid === config.adminTelegramId) return true;
+    const admins = await this.getAdmins();
+    return admins.some(a => a.telegramId === tid && a.role === 'Owner' && a.status.toLowerCase() === 'active');
+  }
+
+  public async getActiveApprovalAdmins(): Promise<AdminUser[]> {
+    const admins = await this.getAdmins();
+    const active = admins.filter(a => a.status.toLowerCase() === 'active');
+
+    // Ensure config owner is present
+    if (config.adminTelegramId) {
+      const hasConfigOwner = active.some(a => a.telegramId === config.adminTelegramId);
+      if (!hasConfigOwner) {
+        active.unshift({
+          adminId: 'ADM-1',
+          telegramId: config.adminTelegramId,
+          name: config.payeeName || 'Store Owner',
+          username: config.supportUsername ? config.supportUsername.replace('@', '') : 'owner',
+          role: 'Owner',
+          status: 'Active',
+          addedBy: 'System',
+          createdAt: '2026-10-01'
+        });
+      }
+    }
+
+    return active;
   }
 
   public async getSettings(): Promise<SettingItem[]> {

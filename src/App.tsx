@@ -160,7 +160,7 @@ export function App() {
   const totalRevenue = paidPurchases.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
 
   return (
-    <div className="min-h-screen bg-[#faf7ee] text-slate-800 font-sans flex antialiased">
+    <div className="min-h-screen bg-[#040515] text-[#D1D5DB] font-sans flex antialiased selection:bg-[#6366F1] selection:text-white">
       {/* Sidebar Navigation */}
       <Sidebar
         activeTab={activeTab}
@@ -183,7 +183,7 @@ export function App() {
       />
 
       {/* Main Content Area */}
-      <div className="flex-1 lg:pl-72 flex flex-col min-w-0 min-h-screen">
+      <div className="flex-1 lg:pl-72 flex flex-col min-w-0 min-h-screen bg-[#040515]">
         {/* Top Navbar Header */}
         <Header
           activeTab={activeTab}
@@ -206,29 +206,29 @@ export function App() {
           {/* Notification Toast */}
           {notification && (
             <div
-              className={`p-4 rounded-xl border flex items-start justify-between shadow-xs transition-all ${
+              className={`p-4 rounded-xl border flex items-start justify-between shadow-lg transition-all ${
                 notification.type === 'error'
-                  ? 'bg-rose-50 border-rose-200 text-rose-800'
+                  ? 'bg-[#111426] border-[#EF4444]/40 text-[#EF4444]'
                   : notification.type === 'success'
-                  ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                  : 'bg-blue-50 border-blue-200 text-blue-800'
+                  ? 'bg-[#111426] border-[#22C55E]/40 text-[#22C55E]'
+                  : 'bg-[#111426] border-[#6366F1]/40 text-[#F8FAFC]'
               }`}
             >
               <div className="flex items-start space-x-2.5">
                 {notification.type === 'error' ? (
-                  <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                  <AlertCircle className="w-5 h-5 text-[#EF4444] shrink-0 mt-0.5" />
                 ) : notification.type === 'success' ? (
-                  <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                  <CheckCircle className="w-5 h-5 text-[#22C55E] shrink-0 mt-0.5" />
                 ) : (
-                  <Info className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                  <Info className="w-5 h-5 text-[#6366F1] shrink-0 mt-0.5" />
                 )}
-                <div className="text-xs sm:text-sm font-medium leading-relaxed">
+                <div className="text-xs sm:text-sm font-medium leading-relaxed text-[#F8FAFC]">
                   {notification.message}
                 </div>
               </div>
               <button
                 onClick={() => setNotification(null)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-black/5 transition ml-2"
+                className="p-1 rounded-lg text-[#9CA3AF] hover:text-[#F8FAFC] hover:bg-[#1A1D32] transition ml-2"
                 aria-label="Dismiss notification"
               >
                 <X className="w-4 h-4" />

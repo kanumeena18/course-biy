@@ -6,15 +6,16 @@ export const keyboards = {
   mainMenu: () => {
     return Markup.inlineKeyboard([
       [
-        Markup.button.callback('🔎 Search Course', 'search_course'),
-        Markup.button.callback('📚 Browse Courses', 'browse_courses')
+        Markup.button.callback('🔍 Search Course', 'search_course'),
+        Markup.button.callback('📚 Send All Course', 'send_all_course_cards')
       ],
       [
         Markup.button.callback('🛒 My Purchases', 'my_purchases'),
-        Markup.button.callback('❓ Help', 'help_info')
+        Markup.button.callback('🌐 Browse Courses', 'browse_courses')
       ],
       [
-        Markup.button.callback('💬 Support', 'support_info')
+        Markup.button.callback('❓ Help to Buy', 'help_info'),
+        Markup.button.callback('📞 Support', 'support_info')
       ]
     ]);
   },
@@ -40,9 +41,18 @@ export const keyboards = {
       buttons.push(navRow);
     }
 
+    // At the very end of Browse Courses:
+    buttons.push([Markup.button.callback('📚 Send All Course', 'send_all_course_cards')]);
     buttons.push([Markup.button.callback('🔙 Back to Main Menu', 'back_to_menu')]);
 
     return Markup.inlineKeyboard(buttons);
+  },
+
+  allCardsCompletion: () => {
+    return Markup.inlineKeyboard([
+      [Markup.button.callback('🌐 Browse Courses', 'browse_courses')],
+      [Markup.button.callback('🔙 Back to Main Menu', 'back_to_menu')]
+    ]);
   },
 
   searchResults: (courses: Course[]) => {

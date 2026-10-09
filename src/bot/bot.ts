@@ -16,6 +16,7 @@ import {
   handleIHavePaid,
   handlePhotoUpload,
   handleGetCourse,
+  handleSendAllCourseCards,
   sessionManager
 } from './handlers/userFlow.js';
 import {
@@ -89,6 +90,8 @@ export function createBot(token = config.botToken): Telegraf<Context> | null {
   bot.command('search', handleSearchPrompt);
   bot.command('myorders', handleMyOrders);
   bot.command('admin', handleAdmin);
+  bot.command('allcourses', handleSendAllCourseCards);
+  bot.command('sendall', handleSendAllCourseCards);
 
   // 3. Navigation Actions
   bot.action('back_to_menu', async (ctx) => {
@@ -99,6 +102,11 @@ export function createBot(token = config.botToken): Telegraf<Context> | null {
   bot.action('browse_courses', async (ctx) => {
     ctx.answerCbQuery().catch(() => {});
     await handleCourses(ctx);
+  });
+
+  bot.action('send_all_course_cards', async (ctx) => {
+    ctx.answerCbQuery().catch(() => {});
+    await handleSendAllCourseCards(ctx);
   });
 
   bot.action('search_course', async (ctx) => {

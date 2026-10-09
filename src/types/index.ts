@@ -24,6 +24,7 @@ export type PurchaseStatus =
   | 'EXPIRED';
 
 export interface Purchase {
+  paymentId?: string;
   telegramUserId: string;
   telegramUsername: string;
   customerName: string;
@@ -33,15 +34,30 @@ export interface Purchase {
   paymentScreenshotFileId: string;
   status: PurchaseStatus;
   createdAt: string;
+  submittedAt?: string;
+  processedByAdminId?: string;
+  processedByAdminName?: string;
+  decision?: 'Approved' | 'Rejected';
+  decisionTimestamp?: string;
+  rejectionReason?: string;
+  accessDeliveryStatus?: 'Delivered' | 'Pending' | 'Failed';
   approvedAt?: string;
   approvedBy?: string;
+  adminNotificationMessageIds?: Array<{ adminId: string; chatId: string; messageId: number }>;
 }
 
+export type AdminRole = 'Owner' | 'Payment Admin' | 'Admin' | 'Moderator';
+
 export interface AdminUser {
+  adminId?: string;
   telegramId: string;
   name: string;
-  role: 'Owner' | 'Admin' | 'Moderator';
+  username?: string;
+  role: AdminRole;
   status: 'Active' | 'Inactive';
+  addedBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface SettingItem {

@@ -116,6 +116,7 @@ export const messages = {
   },
 
   adminPaymentNotification: (p: {
+    paymentId?: string;
     telegramUsername: string;
     telegramUserId: string;
     customerName: string;
@@ -125,11 +126,12 @@ export const messages = {
   }) => {
     return (
       `🔔 <b>NEW PAYMENT SUBMITTED</b>\n\n` +
+      (p.paymentId ? `🧾 <b>Ref ID:</b> <code>${p.paymentId}</code>\n` : '') +
       `👤 <b>Customer:</b> @${p.telegramUsername || 'NoUsername'} (${p.customerName || 'Anonymous'})\n` +
       `🆔 <b>Telegram ID:</b> <code>${p.telegramUserId}</code>\n` +
       `🎓 <b>Course:</b> ${p.courseName} (ID: ${p.courseId})\n` +
       `💰 <b>Amount:</b> ${config.currency}${p.amount}\n` +
-      `⏳ <b>Status:</b> PAYMENT_SUBMITTED\n\n` +
+      `⏳ <b>Status:</b> PENDING VERIFICATION\n\n` +
       `⚠️ <i>Check your bank/UPI app to confirm receipt before approving!</i>`
     );
   },

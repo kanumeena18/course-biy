@@ -144,26 +144,27 @@ export const AddCourseModal: React.FC<AddCourseModalProps> = ({
   const isEditing = Boolean(courseToEdit);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
-      <div className="bg-white border border-slate-200/90 rounded-3xl max-w-xl w-full overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#040515]/80 backdrop-blur-xs">
+      <div className="bg-[#111426] border border-[#252A3D] rounded-3xl max-w-xl w-full overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150">
         {/* Modal Header */}
-        <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+        <div className="p-5 border-b border-[#252A3D] flex items-center justify-between bg-[#0B0D1F]">
           <div className="flex items-center space-x-2.5">
-            <span className="p-2 rounded-xl bg-blue-50 text-blue-600 border border-blue-200">
+            <span className="p-2 rounded-xl bg-[#1A1D32] text-[#875CE9] border border-[#30354D]">
               {isEditing ? <Sparkles className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
             </span>
             <div>
-              <h3 className="font-bold text-slate-900 text-sm sm:text-base">
+              <h3 className="font-bold text-[#FFFFFF] text-sm sm:text-base">
                 {isEditing ? `Edit Course (${courseToEdit?.courseId})` : 'Add New Course Row'}
               </h3>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-[#9CA3AF]">
                 {isEditing ? 'Update course details and Image Thumbnail Path.' : 'Inserts a new course row into your Google Sheets database.'}
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-700 rounded-xl hover:bg-slate-100 transition"
+            className="p-1.5 text-[#9CA3AF] hover:text-[#F8FAFC] rounded-xl hover:bg-[#1A1D32] transition"
+            aria-label="Close modal"
           >
             <X className="w-5 h-5" />
           </button>
@@ -172,83 +173,83 @@ export const AddCourseModal: React.FC<AddCourseModalProps> = ({
         {/* Modal Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[82vh] overflow-y-auto">
           {error && (
-            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs">
+            <div className="p-3 rounded-xl bg-[#111426] border border-[#EF4444]/40 text-[#EF4444] text-xs">
               {error}
             </div>
           )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Course Name *</label>
+              <label className="block text-xs font-semibold text-[#F8FAFC] mb-1">Course Name *</label>
               <input
                 type="text"
                 required
                 value={formData.courseName}
                 onChange={e => setFormData({ ...formData, courseName: e.target.value })}
                 placeholder="e.g. Master Video Editing"
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:bg-white"
+                className="w-full bg-[#0B0D1F] border border-[#252A3D] rounded-xl px-3 py-2 text-xs text-[#D1D5DB] placeholder-[#6B7280] focus:outline-none focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1]"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Creator Name *</label>
+              <label className="block text-xs font-semibold text-[#F8FAFC] mb-1">Creator Name *</label>
               <input
                 type="text"
                 required
                 value={formData.creatorName}
                 onChange={e => setFormData({ ...formData, creatorName: e.target.value })}
                 placeholder="e.g. Kabir Khan"
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:bg-white"
+                className="w-full bg-[#0B0D1F] border border-[#252A3D] rounded-xl px-3 py-2 text-xs text-[#D1D5DB] placeholder-[#6B7280] focus:outline-none focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1]"
               />
             </div>
           </div>
 
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Price (₹) *</label>
+              <label className="block text-xs font-semibold text-[#F8FAFC] mb-1">Price (₹) *</label>
               <input
                 type="number"
                 required
                 value={formData.price}
                 onChange={e => setFormData({ ...formData, price: Number(e.target.value) })}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-blue-500 focus:bg-white"
+                className="w-full bg-[#0B0D1F] border border-[#252A3D] rounded-xl px-3 py-2 text-xs text-[#D1D5DB] focus:outline-none focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1]"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Original Price (₹)</label>
+              <label className="block text-xs font-semibold text-[#F8FAFC] mb-1">Original Price (₹)</label>
               <input
                 type="number"
                 value={formData.originalPrice}
                 onChange={e => setFormData({ ...formData, originalPrice: Number(e.target.value) })}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-blue-500 focus:bg-white"
+                className="w-full bg-[#0B0D1F] border border-[#252A3D] rounded-xl px-3 py-2 text-xs text-[#D1D5DB] focus:outline-none focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1]"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Size *</label>
+              <label className="block text-xs font-semibold text-[#F8FAFC] mb-1">Size *</label>
               <input
                 type="text"
                 value={formData.courseSize}
                 onChange={e => setFormData({ ...formData, courseSize: e.target.value })}
                 placeholder="e.g. 3.2 GB"
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-blue-500 focus:bg-white"
+                className="w-full bg-[#0B0D1F] border border-[#252A3D] rounded-xl px-3 py-2 text-xs text-[#D1D5DB] placeholder-[#6B7280] focus:outline-none focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1]"
               />
             </div>
           </div>
 
           {/* REQUIRED FIELD: Image Thumbnail Path with Live Preview */}
-          <div className="p-4 rounded-2xl bg-blue-50/50 border border-blue-200/80 space-y-3">
+          <div className="p-4 rounded-2xl bg-[#0B0D1F] border border-[#252A3D] space-y-3">
             <div className="flex items-center justify-between">
               <div>
-                <label className="block text-xs font-bold text-slate-900">
+                <label className="block text-xs font-bold text-[#FFFFFF]">
                   Image Thumbnail Path
                 </label>
-                <p className="text-[11px] text-slate-500">
+                <p className="text-[11px] text-[#9CA3AF]">
                   Enter an image URL (https://...) or local path (assets/...) for Telegram course results.
                 </p>
               </div>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#1A1D32] text-[#875CE9] border border-[#30354D]">
                 Telegram Photo
               </span>
             </div>
@@ -261,12 +262,12 @@ export const AddCourseModal: React.FC<AddCourseModalProps> = ({
                 setImagePreviewError(false);
               }}
               placeholder="https://images.unsplash.com/... or assets/qr-code.png"
-              className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
+              className="w-full bg-[#111426] border border-[#252A3D] rounded-xl px-3 py-2 text-xs text-[#D1D5DB] placeholder-[#6B7280] focus:outline-none focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1]"
             />
 
             {/* Quick Presets Picker */}
             <div className="flex flex-wrap items-center gap-1.5 pt-1">
-              <span className="text-[10px] font-bold text-slate-500">Quick Samples:</span>
+              <span className="text-[10px] font-bold text-[#9CA3AF]">Quick Samples:</span>
               {PRESET_THUMBNAILS.map(preset => (
                 <button
                   type="button"
@@ -275,7 +276,7 @@ export const AddCourseModal: React.FC<AddCourseModalProps> = ({
                     setFormData({ ...formData, thumbnailUrl: preset.url });
                     setImagePreviewError(false);
                   }}
-                  className="px-2 py-0.5 rounded-lg bg-white hover:bg-slate-100 text-[10px] font-semibold text-slate-700 border border-slate-200 transition"
+                  className="px-2 py-0.5 rounded-lg bg-[#1A1D32] hover:bg-[#252A3D] text-[10px] font-semibold text-[#E5E7EB] hover:text-[#FFFFFF] border border-[#30354D] transition"
                 >
                   {preset.name}
                 </button>
@@ -283,22 +284,22 @@ export const AddCourseModal: React.FC<AddCourseModalProps> = ({
             </div>
 
             {/* Live Thumbnail Preview Box */}
-            <div className="mt-2 p-3 bg-white border border-slate-200 rounded-xl">
-              <div className="text-[11px] font-bold text-slate-700 mb-2 flex items-center justify-between">
+            <div className="mt-2 p-3 bg-[#040515] border border-[#252A3D] rounded-xl">
+              <div className="text-[11px] font-bold text-[#D1D5DB] mb-2 flex items-center justify-between">
                 <span className="flex items-center space-x-1.5">
-                  <ImageIcon className="w-3.5 h-3.5 text-blue-600" />
+                  <ImageIcon className="w-3.5 h-3.5 text-[#6366F1]" />
                   <span>Admin Panel Thumbnail Preview:</span>
                 </span>
                 {formData.thumbnailUrl ? (
-                  <span className="text-[10px] text-emerald-600 font-semibold">Ready for Telegram</span>
+                  <span className="text-[10px] text-[#22C55E] font-semibold">Ready for Telegram</span>
                 ) : (
-                  <span className="text-[10px] text-slate-400 italic">No image set (Text-only display)</span>
+                  <span className="text-[10px] text-[#6B7280] italic">No image set (Text-only display)</span>
                 )}
               </div>
 
               {formData.thumbnailUrl ? (
                 <div className="flex items-center space-x-3.5">
-                  <div className="w-24 h-16 rounded-lg overflow-hidden border border-slate-200 bg-slate-100 flex-shrink-0 flex items-center justify-center relative">
+                  <div className="w-24 h-16 rounded-lg overflow-hidden border border-[#252A3D] bg-[#0B0D1F] shrink-0 flex items-center justify-center relative">
                     {!imagePreviewError ? (
                       <img
                         src={formData.thumbnailUrl}
@@ -307,24 +308,24 @@ export const AddCourseModal: React.FC<AddCourseModalProps> = ({
                         onError={() => setImagePreviewError(true)}
                       />
                     ) : (
-                      <div className="text-center p-1 text-slate-400">
-                        <AlertCircle className="w-5 h-5 mx-auto text-amber-500" />
+                      <div className="text-center p-1 text-[#6B7280]">
+                        <AlertCircle className="w-5 h-5 mx-auto text-[#F59E0B]" />
                         <span className="text-[9px] leading-tight block">Local / Unrendered</span>
                       </div>
                     )}
                   </div>
-                  <div className="text-xs text-slate-600 space-y-0.5">
-                    <div className="font-semibold text-slate-900 truncate max-w-[280px]">
+                  <div className="text-xs text-[#9CA3AF] space-y-0.5">
+                    <div className="font-semibold text-[#FFFFFF] truncate max-w-[280px]">
                       {formData.courseName || 'Course Title'}
                     </div>
-                    <div className="text-[11px] text-slate-500">
+                    <div className="text-[11px] text-[#9CA3AF]">
                       When searched on Telegram, this image will accompany the course card!
                     </div>
                   </div>
                 </div>
               ) : (
-                <div className="py-2.5 px-3 rounded-lg bg-slate-50 text-slate-400 text-xs flex items-center space-x-2 border border-dashed border-slate-200">
-                  <ImageIcon className="w-4 h-4 text-slate-300" />
+                <div className="py-2.5 px-3 rounded-lg bg-[#0B0D1F] text-[#6B7280] text-xs flex items-center space-x-2 border border-dashed border-[#252A3D]">
+                  <ImageIcon className="w-4 h-4 text-[#6B7280]" />
                   <span>No thumbnail configured. The bot will send clean text card without photo.</span>
                 </div>
               )}
@@ -333,22 +334,22 @@ export const AddCourseModal: React.FC<AddCourseModalProps> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Language</label>
+              <label className="block text-xs font-semibold text-[#F8FAFC] mb-1">Language</label>
               <input
                 type="text"
                 value={formData.language}
                 onChange={e => setFormData({ ...formData, language: e.target.value })}
                 placeholder="e.g. Hindi, English"
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-blue-500 focus:bg-white"
+                className="w-full bg-[#0B0D1F] border border-[#252A3D] rounded-xl px-3 py-2 text-xs text-[#D1D5DB] placeholder-[#6B7280] focus:outline-none focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1]"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Visibility Status</label>
+              <label className="block text-xs font-semibold text-[#F8FAFC] mb-1">Visibility Status</label>
               <select
                 value={formData.status}
                 onChange={e => setFormData({ ...formData, status: e.target.value as 'Active' | 'Inactive' })}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-blue-500 focus:bg-white"
+                className="w-full bg-[#0B0D1F] border border-[#252A3D] rounded-xl px-3 py-2 text-xs text-[#D1D5DB] focus:outline-none focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1]"
               >
                 <option value="Active">Active (Visible to customers)</option>
                 <option value="Inactive">Inactive (Hidden from customers)</option>
@@ -357,43 +358,43 @@ export const AddCourseModal: React.FC<AddCourseModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Google Drive Download Link *</label>
+            <label className="block text-xs font-semibold text-[#F8FAFC] mb-1">Google Drive Download Link *</label>
             <input
               type="url"
               required
               value={formData.driveLink}
               onChange={e => setFormData({ ...formData, driveLink: e.target.value })}
               placeholder="https://drive.google.com/drive/folders/..."
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-blue-500 focus:bg-white"
+              className="w-full bg-[#0B0D1F] border border-[#252A3D] rounded-xl px-3 py-2 text-xs text-[#D1D5DB] placeholder-[#6B7280] focus:outline-none focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1]"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Secret ZIP Extraction Password *</label>
+            <label className="block text-xs font-semibold text-[#F8FAFC] mb-1">Secret ZIP Extraction Password *</label>
             <input
               type="text"
               required
               value={formData.zipPassword}
               onChange={e => setFormData({ ...formData, zipPassword: e.target.value })}
               placeholder="e.g. PASS_2026_XYZ"
-              className="w-full bg-slate-50 border border-amber-300 rounded-xl px-3 py-2 text-xs text-amber-900 font-mono font-bold focus:outline-none focus:border-blue-500 focus:bg-white"
+              className="w-full bg-[#0B0D1F] border border-[#30354D] rounded-xl px-3 py-2 text-xs text-[#F59E0B] font-mono font-bold focus:outline-none focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1]"
             />
-            <p className="text-[11px] text-slate-400 mt-1">
+            <p className="text-[11px] text-[#9CA3AF] mt-1">
               🔒 Delivered only after you approve payment in bank app. Never exposed before payment.
             </p>
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Description</label>
+            <label className="block text-xs font-semibold text-[#F8FAFC] mb-1">Description</label>
             <textarea
               rows={2}
               value={formData.description}
               onChange={e => setFormData({ ...formData, description: e.target.value })}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-blue-500 focus:bg-white"
+              className="w-full bg-[#0B0D1F] border border-[#252A3D] rounded-xl px-3 py-2 text-xs text-[#D1D5DB] placeholder-[#6B7280] focus:outline-none focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1]"
             />
           </div>
 
-          <div className="pt-3 flex items-center justify-between border-t border-slate-100">
+          <div className="pt-3 flex items-center justify-between border-t border-[#252A3D]">
             {isEditing && courseToEdit && onDeleteCourse ? (
               <div className="flex items-center space-x-2">
                 <button
@@ -402,8 +403,8 @@ export const AddCourseModal: React.FC<AddCourseModalProps> = ({
                   onClick={handleDelete}
                   className={`px-3 py-2 text-xs font-semibold rounded-xl transition flex items-center space-x-1.5 ${
                     confirmDelete
-                      ? 'bg-rose-600 hover:bg-rose-700 text-white animate-pulse'
-                      : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
+                      ? 'bg-[#EF4444] text-white animate-pulse'
+                      : 'bg-[#EF4444]/15 hover:bg-[#EF4444]/25 text-[#EF4444] border border-[#EF4444]/30'
                   }`}
                   title="Delete course permanently"
                 >
@@ -414,7 +415,7 @@ export const AddCourseModal: React.FC<AddCourseModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setConfirmDelete(false)}
-                    className="text-[11px] text-slate-500 hover:text-slate-800 underline"
+                    className="text-[11px] text-[#9CA3AF] hover:text-[#F8FAFC] underline"
                   >
                     Cancel
                   </button>
@@ -426,14 +427,14 @@ export const AddCourseModal: React.FC<AddCourseModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 text-xs font-semibold text-slate-500 hover:text-slate-800 rounded-xl transition"
+                className="px-4 py-2 text-xs font-semibold rounded-xl bg-[#1A1D32] border border-[#30354D] text-[#E5E7EB] hover:bg-[#252A3D] hover:text-[#FFFFFF] transition"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={isSubmitting || isDeleting}
-                className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center space-x-1.5"
+                className="px-5 py-2 bg-[#6366F1] hover:bg-[#4F46E5] text-white rounded-xl text-xs font-bold transition shadow-md shadow-[#6366F1]/20 flex items-center space-x-1.5"
               >
                 <Check className="w-4 h-4" />
                 <span>{isSubmitting ? 'Saving...' : (isEditing ? 'Update Course' : 'Save to Google Sheet')}</span>

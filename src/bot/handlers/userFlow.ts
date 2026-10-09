@@ -465,3 +465,81 @@ export async function handleGetCourse(ctx: Context, courseId: string) {
     await ctx.reply('⚠️ Error fetching course details.');
   }
 }
+
+// Track users currently receiving all course cards to prevent duplicate card delivery from rapid button presses
+const sendingAllUsersInProgress = new Set<number>();
+
+export async function handleSendAllCourseCards(ctx: Context) {
+  const userId = ctx.from?.id;
+  if (userId) {
+    sessionManager.reset(userId);
+    if (sendingAllUsersInProgress.has(userId)) {
+      await ctx.reply('⏳ Course cards are already being sent. Please check your messages above.');
+      return;
+    }
+  }
+
+  try {
+    if (userId) sendingAllUsersInProgress.add(userId);
+
+    // Fetch fresh active courses from Google Sheets / persistent storage
+    const allCourses = await googleSheetsService.getCourses(true);
+
+    // Deduplicate by courseId and ensure status is Active
+    const seenIds = new Set<string>();
+    const uniqueCourses: Course[] = [];
+    for (const c of allCourses) {
+      const id = (c.courseId || '').trim().toLowerCase();
+      if (id && !seenIds.has(id) && c.status.toLowerCase() === 'active') {
+        seenIds.add(id);
+        uniqueCourses.push(c);
+      }
+    }
+
+    if (uniqueCourses.length === 0) {
+      await ctx.reply('📚 No courses are available right now. Please check back later.', keyboards.mainMenu());
+      return;
+    }
+
+    // Short loading / progress announcement
+    await ctx.reply(
+      `📚 <b>Sending all available courses (${uniqueCourses.length} courses)...</b>\n\n<i>Please wait a moment while the courses are delivered.</i>`,
+      { parse_mode: 'HTML' }
+    );
+
+    let sentCount = 0;
+    for (let i = 0; i < uniqueCourses.length; i++) {
+      const course = uniqueCourses[i];
+      try {
+        await sendCourseCard(ctx, course);
+        sentCount++;
+      } catch (err: any) {
+        console.error(`❌ [sendAllCourse] Failed to send card for ${course.courseId}:`, err.message || err);
+      }
+
+      // Safe pause between individual cards to respect Telegram rate limits and avoid flood waits
+      if (i < uniqueCourses.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 350));
+      }
+    }
+
+    // Completion confirmation
+    await ctx.reply(
+      `✅ <b>All ${sentCount} courses sent!</b>\n\nClick <b>🛒 BUY NOW</b> on any course above to purchase.`,
+      {
+        parse_mode: 'HTML',
+        ...keyboards.allCardsCompletion()
+      }
+    );
+  } catch (error: any) {
+    console.error('❌ [handleSendAllCourseCards Error]:', error.message || error);
+    try {
+      await ctx.reply('⚠️ Unable to send course cards at the moment. Please try again.');
+    } catch (e) {}
+  } finally {
+    if (userId) {
+      sendingAllUsersInProgress.delete(userId);
+    }
+  }
+}
+

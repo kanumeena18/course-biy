@@ -44,11 +44,12 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
       text: `🎓 <b>Welcome to Course Bazar!</b>\n\n📚 Discover quality courses at affordable prices.\n\n🔎 Search for a course by name to get started.\n\n💳 Simple & secure payment\n⚡ Fast access after verification`,
       timestamp: '10:00 AM',
       buttons: [
-        { label: '🔎 Search Course', action: 'search' },
-        { label: '📚 Browse Courses', action: 'browse' },
+        { label: '🔍 Search Course', action: 'search' },
+        { label: '📚 Send All Course', action: 'send_all_courses' },
         { label: '🛒 My Purchases', action: 'my_purchases' },
-        { label: '❓ Help', action: 'help' },
-        { label: '💬 Support', action: 'support' }
+        { label: '🌐 Browse Courses', action: 'browse' },
+        { label: '❓ Help to Buy', action: 'help' },
+        { label: '📞 Support', action: 'support' }
       ]
     }
   ]);
@@ -159,11 +160,12 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
         sender: 'bot',
         text: `🎓 <b>Welcome to Course Bazar!</b>\n\n📚 Discover quality courses at affordable prices.\n\n🔎 Search for a course by name to get started.\n\n💳 Simple & secure payment\n⚡ Fast access after verification`,
         buttons: [
-          { label: '🔎 Search Course', action: 'search' },
-          { label: '📚 Browse Courses', action: 'browse' },
+          { label: '🔍 Search Course', action: 'search' },
+          { label: '📚 Send All Course', action: 'send_all_courses' },
           { label: '🛒 My Purchases', action: 'my_purchases' },
-          { label: '❓ Help', action: 'help' },
-          { label: '💬 Support', action: 'support' }
+          { label: '🌐 Browse Courses', action: 'browse' },
+          { label: '❓ Help to Buy', action: 'help' },
+          { label: '📞 Support', action: 'support' }
         ]
       });
       return;
@@ -185,7 +187,7 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
       if (activeCourses.length === 0) {
         addCustomerMessage({
           sender: 'bot',
-          text: `📚 <b>AVAILABLE COURSES (0)</b>\n\nNo courses are currently listed. Please add courses from the Admin Panel or check back soon!`,
+          text: `📚 No courses are available right now. Please check back later.`,
           buttons: [{ label: '🔙 Back to Menu', action: 'start' }]
         });
         return;
@@ -198,6 +200,62 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
             label: `🎓 ${c.courseName} - ${configData.currency}${c.price}`,
             action: `view_course_${c.courseId}`
           })),
+          { label: '📚 Send All Course', action: 'send_all_courses' },
+          { label: '🔙 Back to Menu', action: 'start' }
+        ]
+      });
+      return;
+    }
+
+    if (action === 'send_all_courses') {
+      addCustomerMessage({ sender: 'user', text: '📚 Send All Course' });
+      const activeCourses = courses.filter(c => c.status.toLowerCase() === 'active');
+
+      // Deduplicate courses by courseId
+      const seenIds = new Set<string>();
+      const uniqueCourses: Course[] = [];
+      for (const c of activeCourses) {
+        const id = (c.courseId || '').trim().toLowerCase();
+        if (id && !seenIds.has(id)) {
+          seenIds.add(id);
+          uniqueCourses.push(c);
+        }
+      }
+
+      if (uniqueCourses.length === 0) {
+        addCustomerMessage({
+          sender: 'bot',
+          text: `📚 No courses are available right now. Please check back later.`,
+          buttons: [{ label: '🔙 Back to Menu', action: 'start' }]
+        });
+        return;
+      }
+
+      // Progress message
+      addCustomerMessage({
+        sender: 'bot',
+        text: `📚 <b>Sending all available courses (${uniqueCourses.length} courses)...</b>\n\n<i>Please wait a moment while the courses load.</i>`
+      });
+
+      // Send every course card individually using identical layout and action buttons
+      uniqueCourses.forEach(course => {
+        addCustomerMessage({
+          sender: 'bot',
+          photoUrl: course.thumbnailUrl,
+          text: formatCourseCard(course),
+          buttons: [
+            { label: '🛒 BUY NOW', action: `buy_${course.courseId}` },
+            { label: '🔙 Back to Courses', action: 'browse' }
+          ]
+        });
+      });
+
+      // Completion confirmation
+      addCustomerMessage({
+        sender: 'bot',
+        text: `✅ <b>All ${uniqueCourses.length} courses sent!</b>\n\nClick <b>🛒 BUY NOW</b> on any course card above to purchase.`,
+        buttons: [
+          { label: '🌐 Browse Courses', action: 'browse' },
           { label: '🔙 Back to Menu', action: 'start' }
         ]
       });
@@ -523,15 +581,20 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
       handleButtonClick('help');
     } else if (text === '/support') {
       handleButtonClick('support');
+    } else if (text === '/allcourses' || text === '/sendall') {
+      handleButtonClick('send_all_courses');
     } else {
       addCustomerMessage({ sender: 'user', text });
       addCustomerMessage({
         sender: 'bot',
         text: `🎓 Welcome! Please use the buttons below to navigate Course Bazar:`,
         buttons: [
-          { label: '🔎 Search Course', action: 'search' },
-          { label: '📚 Browse Courses', action: 'browse' },
-          { label: '🛒 My Purchases', action: 'my_purchases' }
+          { label: '🔍 Search Course', action: 'search' },
+          { label: '📚 Send All Course', action: 'send_all_courses' },
+          { label: '🛒 My Purchases', action: 'my_purchases' },
+          { label: '🌐 Browse Courses', action: 'browse' },
+          { label: '❓ Help to Buy', action: 'help' },
+          { label: '📞 Support', action: 'support' }
         ]
       });
     }
@@ -729,7 +792,7 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
 
                     {/* Inline Telegram Buttons */}
                     {msg.buttons && msg.buttons.length > 0 && (
-                      <div className="mt-1.5 space-y-1 w-full max-w-[85%]">
+                      <div className={`mt-1.5 w-full max-w-[85%] ${msg.buttons.length === 6 ? 'grid grid-cols-2 gap-1.5' : 'space-y-1'}`}>
                         {msg.buttons.map((btn, bIdx) =>
                           btn.url ? (
                             <a
@@ -739,14 +802,14 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
                               rel="noopener noreferrer"
                               className="w-full py-2 px-3 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 rounded-xl text-xs font-bold text-center flex items-center justify-center space-x-1.5 transition shadow-xs"
                             >
-                              <span>{btn.label}</span>
-                              <ExternalLink className="w-3.5 h-3.5" />
+                              <span className="truncate">{btn.label}</span>
+                              <ExternalLink className="w-3.5 h-3.5 shrink-0" />
                             </a>
                           ) : (
                             <button
                               key={bIdx}
                               onClick={() => handleButtonClick(btn.action)}
-                              className={`w-full py-2 px-3 rounded-xl text-xs font-semibold text-center transition flex items-center justify-center space-x-1.5 shadow-xs ${
+                              className={`w-full py-2 px-2.5 rounded-xl text-xs font-semibold text-center transition flex items-center justify-center space-x-1 shadow-xs ${
                                 btn.action.startsWith('admin_approve')
                                   ? 'bg-emerald-600 text-white hover:bg-emerald-700'
                                   : btn.action.startsWith('admin_reject')
@@ -756,7 +819,7 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
                                   : 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200'
                               }`}
                             >
-                              <span>{btn.label}</span>
+                              <span className="truncate">{btn.label}</span>
                             </button>
                           )
                         )}

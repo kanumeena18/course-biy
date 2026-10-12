@@ -1,6 +1,8 @@
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import { google, sheets_v4 } from 'googleapis';
-import { config } from '../config/config.js';
+import { config, parseSpreadsheetId } from '../config/config.js';
 import { Course, Purchase, AdminUser, AdminRole, SettingItem, PurchaseStatus } from '../types/index.js';
 import { systemLogger } from './logger.js';
 
@@ -119,7 +121,7 @@ export class GoogleSheetsService {
   private readonly PURCHASES_TTL = 15_000;  // 15 seconds
   private readonly SETTINGS_TTL = 180_000;  // 3 minutes
   private readonly ADMINS_TTL = 180_000;    // 3 minutes
-  private readonly API_TIMEOUT = 5_000;     // 5 seconds max per Google API request
+  private readonly API_TIMEOUT = 25_000;    // 25 seconds max per Google API request
 
   // Synchronization locks to prevent concurrent duplicate requests
   private isFetchingCourses = false;
@@ -127,7 +129,67 @@ export class GoogleSheetsService {
   private isFetchingSettings = false;
   private isFetchingAdmins = false;
 
+  private readonly DATA_DIR = path.resolve(process.cwd(), 'data');
+  private readonly PURCHASES_FILE = path.join(this.DATA_DIR, 'purchases.json');
+  private readonly COURSES_FILE = path.join(this.DATA_DIR, 'courses.json');
+  private readonly ADMINS_FILE = path.join(this.DATA_DIR, 'admins.json');
+  private readonly SETTINGS_FILE = path.join(this.DATA_DIR, 'settings.json');
+
+  private loadLocalData() {
+    try {
+      if (!fs.existsSync(this.DATA_DIR)) {
+        fs.mkdirSync(this.DATA_DIR, { recursive: true });
+      }
+
+      if (fs.existsSync(this.PURCHASES_FILE)) {
+        const raw = fs.readFileSync(this.PURCHASES_FILE, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          this.purchasesCache = parsed;
+        }
+      }
+
+      if (fs.existsSync(this.COURSES_FILE)) {
+        const raw = fs.readFileSync(this.COURSES_FILE, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          this.coursesCache = parsed;
+        }
+      }
+
+      if (fs.existsSync(this.ADMINS_FILE)) {
+        const raw = fs.readFileSync(this.ADMINS_FILE, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          this.adminsCache = parsed;
+        }
+      }
+
+      if (fs.existsSync(this.SETTINGS_FILE)) {
+        const raw = fs.readFileSync(this.SETTINGS_FILE, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          this.settingsCache = parsed;
+        }
+      }
+    } catch (err: any) {
+      console.warn('⚠️ [DB] Notice loading local persistence files:', err.message);
+    }
+  }
+
+  private saveLocalPurchases() {
+    try {
+      if (!fs.existsSync(this.DATA_DIR)) {
+        fs.mkdirSync(this.DATA_DIR, { recursive: true });
+      }
+      fs.writeFileSync(this.PURCHASES_FILE, JSON.stringify(this.purchasesCache, null, 2), 'utf-8');
+    } catch (err: any) {
+      console.warn('⚠️ [DB] Notice saving local purchases:', err.message);
+    }
+  }
+
   constructor() {
+    this.loadLocalData();
     this.rebuildCoursesIndex();
     this.rebuildPurchasesIndex();
     this.rebuildSettingsIndex();
@@ -256,19 +318,19 @@ export class GoogleSheetsService {
 
     if (isNotFound) {
       this.isConnected = false;
-      this.lastSyncError = `Spreadsheet ID "${config.googleSheetId}" not found or not shared (404). In Google Sheets, click Share and add "${config.googleServiceAccountEmail}" as Editor. Operating in built-in store mode.`;
-      console.warn(`ℹ️ [DB] ${context}: Spreadsheet not found or not shared (404). Switched to high-speed built-in store mode.`);
+      this.lastSyncError = `Spreadsheet ID "${config.googleSheetId}" not accessible by Service Account (404 Not Found). In Google Sheets, click Share and add "${config.googleServiceAccountEmail}" as Editor.`;
+      console.warn(`⚠️ [DB] ${context}: Spreadsheet "${config.googleSheetId}" not found or not shared with service account "${config.googleServiceAccountEmail}" as Editor.`);
     } else if (isPermission) {
       this.isConnected = false;
-      this.lastSyncError = `Permission denied (403). Share Google Sheet with "${config.googleServiceAccountEmail}" as Editor. Operating in built-in store mode.`;
-      console.warn(`ℹ️ [DB] ${context}: Permission denied (403). Switched to built-in store mode.`);
+      this.lastSyncError = `Permission denied (403). In Google Sheets, click Share and add "${config.googleServiceAccountEmail}" as Editor.`;
+      console.warn(`⚠️ [DB] ${context}: Permission denied (403). Please share sheet with "${config.googleServiceAccountEmail}" as Editor.`);
     } else if (isAuth) {
       this.isConnected = false;
-      this.lastSyncError = 'Google Service Account credentials invalid. Operating in built-in store mode.';
-      console.warn(`ℹ️ [DB] ${context}: Service account invalid. Switched to built-in store mode.`);
+      this.lastSyncError = 'Google Service Account credentials invalid. Please verify private key formatting.';
+      console.warn(`⚠️ [DB] ${context}: Service account credentials invalid.`);
     } else {
       this.lastSyncError = errMsg;
-      console.warn(`⚠️ [DB] ${context} notice:`, errMsg);
+      console.warn(`⚠️ [DB] ${context} error:`, errMsg);
     }
 
     systemLogger.log({
@@ -387,10 +449,10 @@ export class GoogleSheetsService {
     }
   }
 
-  private async initClient(): Promise<boolean> {
+  private async initClient(attempt = 1): Promise<boolean> {
     if (!config.isGoogleConfigured || !config.googleSheetId) {
-      console.log('ℹ️ [DB] Running with high-speed built-in store mode (Google Sheet ID not configured).');
       this.isConnected = false;
+      this.lastSyncError = 'Google Sheets configuration missing (Sheet ID, Service Account Email, or Private Key).';
       return false;
     }
 
@@ -430,18 +492,24 @@ export class GoogleSheetsService {
         this.lastSyncError = null;
         console.log(`✅ [DB] Google Sheets API v4 connected to spreadsheet: "${testRes.data.properties?.title || config.googleSheetId}"`);
 
-        // Warm up all data sheets concurrently in background upon successful connection
-        setTimeout(() => {
-          Promise.allSettled([
-            this.refreshCoursesFromGoogle(),
-            this.refreshPurchasesFromGoogle(),
-            this.refreshSettingsFromGoogle(),
-            this.refreshAdminsFromGoogle()
-          ]);
-        }, 200);
+        // Synchronize all data sheets from Google upon successful connection
+        await Promise.allSettled([
+          this.refreshCoursesFromGoogle(),
+          this.refreshPurchasesFromGoogle(),
+          this.refreshSettingsFromGoogle(),
+          this.refreshAdminsFromGoogle()
+        ]);
 
         return true;
       } catch (verifyErr: any) {
+        // If timeout or transient error and attempt < 2, retry once
+        const isTimeout = String(verifyErr?.message).includes('Timeout');
+        if (isTimeout && attempt < 2) {
+          console.warn('⏳ [DB] Initial spreadsheet verification timed out, retrying once...');
+          await new Promise(r => setTimeout(r, 1000));
+          return this.initClient(attempt + 1);
+        }
+
         this.handleGoogleApiError('Initial spreadsheet verification', verifyErr);
         this.isConnected = false;
         return false;
@@ -455,7 +523,7 @@ export class GoogleSheetsService {
 
   public async reconnect(newSheetId?: string): Promise<{ success: boolean; message: string; status: any }> {
     if (newSheetId && newSheetId.trim()) {
-      config.googleSheetId = newSheetId.trim();
+      config.googleSheetId = parseSpreadsheetId(newSheetId);
     }
     const success = await this.initClient();
     return {
@@ -536,12 +604,17 @@ export class GoogleSheetsService {
 
   public async getCourses(activeOnly = true): Promise<Course[]> {
     const now = Date.now();
-    // Non-blocking background revalidation if stale
-    if (this.isConnected && (now - this.lastCoursesFetch > this.COURSES_TTL)) {
-      this.refreshCoursesFromGoogle().catch(() => {});
+
+    // If not connected yet but Google is configured, attempt connection
+    if (!this.isConnected && config.isGoogleConfigured && !this.isFetchingCourses) {
+      await this.initClient().catch(() => {});
     }
 
-    // Return instant memory cache in < 0.1ms without array allocation
+    // Refresh if connected and cache is empty or stale
+    if (this.isConnected && (this.coursesCache.length === 0 || (now - this.lastCoursesFetch > this.COURSES_TTL))) {
+      await this.refreshCoursesFromGoogle().catch(() => {});
+    }
+
     if (activeOnly) {
       return this.activeCoursesCache;
     }
@@ -775,47 +848,56 @@ export class GoogleSheetsService {
       this.purchasesCache.unshift(newRecord);
     }
     this.rebuildPurchasesIndex();
+    this.saveLocalPurchases();
 
-    // Non-blocking write to Google Sheet with timeout
+    // Synchronously persist to Google Sheets before confirming if connected
     if (this.isConnected && this.sheetsClient && config.googleSheetId) {
-      const rowValues = [
-        newRecord.paymentId,
-        newRecord.telegramUserId,
-        newRecord.customerName,
-        newRecord.courseId,
-        newRecord.courseName,
-        newRecord.amount,
-        newRecord.paymentScreenshotFileId,
-        newRecord.createdAt,
-        newRecord.status,
-        '', // Processed By Admin ID
-        '', // Processed By Admin Name
-        'Pending', // Decision
-        '', // Decision Timestamp
-        '', // Rejection Reason
-        'Pending' // Access Delivery Status
-      ];
+      try {
+        console.log(`📝 [GoogleSheets] Writing payment verification record to worksheet "Purchases": paymentId=${newRecord.paymentId}, userId=${newRecord.telegramUserId}, courseId=${newRecord.courseId}, amount=${newRecord.amount}`);
+        const rowValues = [
+          newRecord.paymentId,
+          newRecord.telegramUserId,
+          newRecord.customerName,
+          newRecord.courseId,
+          newRecord.courseName,
+          newRecord.amount,
+          newRecord.paymentScreenshotFileId,
+          newRecord.createdAt,
+          newRecord.status,
+          '', // Processed By Admin ID
+          '', // Processed By Admin Name
+          'Pending', // Decision
+          '', // Decision Timestamp
+          '', // Rejection Reason
+          'Pending' // Access Delivery Status
+        ];
 
-      withTimeout(
-        this.sheetsClient.spreadsheets.values.append({
-          spreadsheetId: config.googleSheetId,
-          range: 'Purchases!A:O',
-          valueInputOption: 'USER_ENTERED',
-          requestBody: { values: [rowValues] }
-        }),
-        this.API_TIMEOUT,
-        'appendPurchaseToGoogle'
-      ).then(appendRes => {
+        const appendRes = await withTimeout(
+          this.sheetsClient.spreadsheets.values.append({
+            spreadsheetId: config.googleSheetId,
+            range: 'Purchases!A:O',
+            valueInputOption: 'USER_ENTERED',
+            requestBody: { values: [rowValues] }
+          }),
+          this.API_TIMEOUT,
+          'appendPurchaseToGoogle'
+        );
+
         const updatedRange = appendRes.data?.updates?.updatedRange;
         if (updatedRange) {
           const match = updatedRange.match(/!A(\d+):/);
           if (newRecord.paymentId && match && match[1]) {
-            this.purchaseRowIndexMap.set(newRecord.paymentId, parseInt(match[1], 10));
+            const rowIndex = parseInt(match[1], 10);
+            this.purchaseRowIndexMap.set(newRecord.paymentId, rowIndex);
+            console.log(`✅ [GoogleSheets] Payment record ${newRecord.paymentId} successfully persisted in worksheet "Purchases" at row ${rowIndex}`);
           }
         }
-      }).catch(err => {
-        this.handleGoogleApiError('Non-blocking append purchase', err);
-      });
+      } catch (err: any) {
+        this.handleGoogleApiError('Synchronous append purchase to Google Sheets', err);
+        if (this.isConnected) {
+          throw new Error(`Failed to save payment record to Google Sheets: ${err.message || String(err)}`);
+        }
+      }
     }
 
     return newRecord;
@@ -867,21 +949,150 @@ export class GoogleSheetsService {
       const cid = String(params.courseId).trim().toLowerCase();
       const pid = params.paymentId?.trim();
 
-      // Find the purchase record
+      // Find the purchase record with robust multi-strategy lookup (including Telegram 64-byte truncation safety)
       let targetIndex = -1;
+      let lookupMethod = 'none';
+
       if (pid) {
-        targetIndex = this.purchasesCache.findIndex(p => p.paymentId === pid);
-      }
-      if (targetIndex < 0) {
         targetIndex = this.purchasesCache.findIndex(
-          p => p.telegramUserId === uid && p.courseId.toLowerCase() === cid
+          p => p.paymentId && p.paymentId.trim().toLowerCase() === pid.toLowerCase()
         );
+        if (targetIndex >= 0) lookupMethod = 'exact-paymentId';
+      }
+
+      if (targetIndex < 0 && pid) {
+        targetIndex = this.purchasesCache.findIndex(
+          p => p.paymentId && (
+            p.paymentId.trim().toLowerCase().startsWith(pid.toLowerCase()) ||
+            pid.toLowerCase().startsWith(p.paymentId.trim().toLowerCase())
+          )
+        );
+        if (targetIndex >= 0) lookupMethod = 'partial-paymentId';
       }
 
       if (targetIndex < 0) {
+        const matchingPending = this.purchasesCache
+          .map((p, idx) => ({ p, idx }))
+          .filter(item =>
+            String(item.p.telegramUserId).trim() === uid &&
+            item.p.courseId.trim().toLowerCase() === cid &&
+            (item.p.status === 'PAYMENT_SUBMITTED' || item.p.status === 'PAYMENT_PENDING')
+          );
+
+        if (matchingPending.length > 0) {
+          matchingPending.sort((a, b) => {
+            const timeA = new Date(a.p.submittedAt || a.p.createdAt || 0).getTime();
+            const timeB = new Date(b.p.submittedAt || b.p.createdAt || 0).getTime();
+            return timeB - timeA;
+          });
+          targetIndex = matchingPending[0].idx;
+          lookupMethod = 'user-course-pending-fallback';
+        } else {
+          const matchingAny = this.purchasesCache
+            .map((p, idx) => ({ p, idx }))
+            .filter(item =>
+              String(item.p.telegramUserId).trim() === uid &&
+              item.p.courseId.trim().toLowerCase() === cid
+            );
+
+          if (matchingAny.length > 0) {
+            matchingAny.sort((a, b) => {
+              const timeA = new Date(a.p.submittedAt || a.p.createdAt || 0).getTime();
+              const timeB = new Date(b.p.submittedAt || b.p.createdAt || 0).getTime();
+              return timeB - timeA;
+            });
+            targetIndex = matchingAny[0].idx;
+            lookupMethod = 'user-course-any-fallback';
+          }
+        }
+      }
+
+      // Direct Google Sheets fallback query if not found in local cache
+      if (targetIndex < 0 && this.sheetsClient && config.googleSheetId) {
+        try {
+          console.log(`🔍 [GoogleSheets Lookup] Searching worksheet "Purchases" directly for paymentId="${pid || 'none'}", userId="${uid}", courseId="${cid}"`);
+          const res = await withTimeout(
+            this.sheetsClient.spreadsheets.values.get({
+              spreadsheetId: config.googleSheetId,
+              range: 'Purchases!A2:O'
+            }),
+            this.API_TIMEOUT,
+            'findPurchaseInGoogleForDecision'
+          );
+          const rows = res.data.values || [];
+          for (let i = 0; i < rows.length; i++) {
+            const rowPid = String(rows[i][0] || '').trim();
+            const rowUid = String(rows[i][1] || '').trim();
+            const rowCid = String(rows[i][3] || '').trim().toLowerCase();
+            const rowStatus = String(rows[i][8] || 'PAYMENT_PENDING').trim();
+
+            const isPidMatch = Boolean(pid && (
+              rowPid.toLowerCase() === pid.toLowerCase() ||
+              rowPid.toLowerCase().startsWith(pid.toLowerCase()) ||
+              pid.toLowerCase().startsWith(rowPid.toLowerCase())
+            ));
+
+            const isUserCourseMatch = (rowUid === uid && rowCid === cid);
+
+            if (isPidMatch || isUserCourseMatch) {
+              const rowIndex = i + 2;
+              let normalizedStatus: PurchaseStatus = 'PAYMENT_PENDING';
+              if (rowStatus === 'Approved' || rowStatus === 'PAID') normalizedStatus = 'PAID';
+              else if (rowStatus === 'Rejected' || rowStatus === 'REJECTED') normalizedStatus = 'REJECTED';
+              else if (rowStatus === 'PAYMENT_SUBMITTED') normalizedStatus = 'PAYMENT_SUBMITTED';
+
+              const loadedFromSheet: Purchase = {
+                paymentId: rowPid || `PAY-${rowIndex}`,
+                telegramUserId: rowUid,
+                customerName: String(rows[i][2] || 'Customer').trim(),
+                telegramUsername: '',
+                courseId: String(rows[i][3] || '').trim(),
+                courseName: String(rows[i][4] || '').trim(),
+                amount: Number(rows[i][5]) || 0,
+                paymentScreenshotFileId: String(rows[i][6] || '').trim(),
+                createdAt: String(rows[i][7] || new Date().toISOString()).trim(),
+                submittedAt: String(rows[i][7] || new Date().toISOString()).trim(),
+                status: normalizedStatus,
+                processedByAdminId: rows[i][9] ? String(rows[i][9]).trim() : undefined,
+                processedByAdminName: rows[i][10] ? String(rows[i][10]).trim() : undefined,
+                decision: (rows[i][11] === 'Approved' || rows[i][11] === 'Rejected') ? (rows[i][11] as any) : undefined,
+                decisionTimestamp: rows[i][12] ? String(rows[i][12]).trim() : undefined,
+                rejectionReason: rows[i][13] ? String(rows[i][13]).trim() : undefined,
+                accessDeliveryStatus: rows[i][14] ? (String(rows[i][14]).trim() as any) : undefined,
+                approvedAt: rows[i][12] ? String(rows[i][12]).trim() : undefined,
+                approvedBy: rows[i][9] ? String(rows[i][9]).trim() : undefined
+              };
+
+              if (loadedFromSheet.paymentId) {
+                this.purchaseRowIndexMap.set(loadedFromSheet.paymentId, rowIndex);
+              }
+              this.purchasesCache.push(loadedFromSheet);
+              this.rebuildPurchasesIndex();
+              targetIndex = this.purchasesCache.length - 1;
+              lookupMethod = `sheets-direct-row-${rowIndex}`;
+              console.log(`✅ [GoogleSheets Lookup] Found payment verification in worksheet "Purchases" at row ${rowIndex}`);
+              break;
+            }
+          }
+        } catch (sheetLookupErr: any) {
+          console.warn(`⚠️ [GoogleSheets Lookup Error]:`, sheetLookupErr?.message || sheetLookupErr);
+        }
+      }
+
+      console.log(`🔍 [Payment Lookup] Final result: index=${targetIndex}, method=${lookupMethod}, userId=${uid}, courseId=${cid}, paymentId=${pid || 'none'}`);
+
+      if (targetIndex < 0) {
+        const errorDetails = `Payment verification not found in worksheet "Purchases" for userId=${uid}, courseId=${cid}, paymentId=${pid || 'none'}. Total cached purchases: ${this.purchasesCache.length}`;
+        console.warn(`⚠️ [DB Lookup] ${errorDetails}`);
+        systemLogger.log({
+          level: 'warn',
+          category: 'sheets',
+          message: 'Payment verification not found in worksheet "Purchases"',
+          details: errorDetails
+        });
         return {
           success: false,
-          error: 'Payment verification record not found in database.'
+          error: 'Payment verification not found in your database. Please ensure the payment screenshot was submitted correctly or check the order identifier.'
         };
       }
 
@@ -922,6 +1133,7 @@ export class GoogleSheetsService {
 
       this.purchasesCache[targetIndex] = updated;
       this.rebuildPurchasesIndex();
+      this.saveLocalPurchases();
 
       // Sync with Google Sheets asynchronously (direct update if row index is known)
       if (this.isConnected && this.sheetsClient && config.googleSheetId) {
@@ -1762,6 +1974,79 @@ export class GoogleSheetsService {
     }
 
     return true;
+  }
+
+  public async debugPayment(paymentId: string) {
+    const pid = paymentId.trim();
+    const purchases = await this.getPurchases();
+    
+    let found = purchases.find(p => p.paymentId && p.paymentId.trim().toLowerCase() === pid.toLowerCase());
+    let matchType = 'exact';
+
+    if (!found) {
+      found = purchases.find(p => p.paymentId && (
+        p.paymentId.trim().toLowerCase().startsWith(pid.toLowerCase()) ||
+        pid.toLowerCase().startsWith(p.paymentId.trim().toLowerCase())
+      ));
+      if (found) matchType = 'partial';
+    }
+
+    return {
+      queryPaymentId: pid,
+      found: Boolean(found),
+      matchType: found ? matchType : null,
+      payment: found || null,
+      sheetsStatus: this.getStatus(),
+      totalCachedPurchases: purchases.length,
+      allPaymentIds: purchases.map(p => p.paymentId).filter(Boolean)
+    };
+  }
+
+  public async updateDeliveryStatus(
+    userId: string,
+    courseId: string,
+    status: 'Delivered' | 'Pending' | 'Failed',
+    errorDetails?: string,
+    paymentId?: string
+  ): Promise<void> {
+    const uid = String(userId).trim();
+    const cid = String(courseId).trim().toLowerCase();
+    let idx = -1;
+    if (paymentId) {
+      idx = this.purchasesCache.findIndex(p => p.paymentId && p.paymentId.trim().toLowerCase() === paymentId.trim().toLowerCase());
+    }
+    if (idx < 0) {
+      idx = this.purchasesCache.findIndex(
+        p => p.telegramUserId === uid && p.courseId.toLowerCase() === cid
+      );
+    }
+    if (idx >= 0) {
+      this.purchasesCache[idx].accessDeliveryStatus = status;
+      this.rebuildPurchasesIndex();
+      this.saveLocalPurchases();
+    }
+
+    if (this.sheetsClient && config.googleSheetId) {
+      const targetPid = paymentId || (idx >= 0 ? this.purchasesCache[idx].paymentId : undefined);
+      const knownRow = targetPid ? this.purchaseRowIndexMap.get(targetPid) : undefined;
+      if (knownRow) {
+        try {
+          await withTimeout(
+            this.sheetsClient.spreadsheets.values.update({
+              spreadsheetId: config.googleSheetId,
+              range: `Purchases!O${knownRow}`,
+              valueInputOption: 'USER_ENTERED',
+              requestBody: { values: [[status]] }
+            }),
+            this.API_TIMEOUT,
+            'updateDeliveryStatusInGoogle'
+          );
+          console.log(`✅ [GoogleSheets] Updated accessDeliveryStatus to "${status}" in worksheet "Purchases" row ${knownRow}`);
+        } catch (e: any) {
+          console.warn(`⚠️ [GoogleSheets] Notice updating delivery status in sheet: ${e.message}`);
+        }
+      }
+    }
   }
 
   public getRawData() {

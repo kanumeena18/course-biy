@@ -10,3 +10,4 @@ coverage/
 *.key
 service-account*.json
 credentials.json
+data/

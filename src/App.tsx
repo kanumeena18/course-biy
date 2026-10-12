@@ -10,6 +10,7 @@ import { ManageAdmins } from './components/ManageAdmins.js';
 import { AddAdminModal } from './components/AddAdminModal.js';
 import { BeginnerGuide } from './components/BeginnerGuide.js';
 import { Course, Purchase, AdminUser, SettingItem } from './types/index.js';
+import { authFetch } from './services/apiClient.js';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<'simulator' | 'sheets' | 'admins' | 'guide'>('simulator');
@@ -66,8 +67,8 @@ export function App() {
   const loadAllData = async () => {
     try {
       const [statusRes, rawSheetsRes] = await Promise.all([
-        fetch('/api/status'),
-        fetch('/api/raw-sheets')
+        authFetch('/api/status'),
+        authFetch('/api/raw-sheets')
       ]);
 
       if (statusRes.ok) {
@@ -99,7 +100,7 @@ export function App() {
     setIsTogglingBot(true);
     try {
       const action = statusData.bot.isRunning ? 'STOP' : 'START';
-      const res = await fetch('/api/bot-toggle', {
+      const res = await authFetch('/api/bot-toggle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action })
@@ -121,26 +122,28 @@ export function App() {
     }
   };
 
-  const handleAdminAction = async (userId: string, courseId: string, action: 'APPROVE' | 'REJECT') => {
+  const handleAdminAction = async (userId: string, courseId: string, action: 'APPROVE' | 'REJECT', paymentId?: string) => {
     try {
-      const res = await fetch('/api/admin-action', {
+      const res = await authFetch('/api/admin-action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, courseId, action })
+        body: JSON.stringify({ userId, courseId, action, paymentId })
       });
       const data = await res.json();
       if (data.success) {
         showNotification(`Payment ${action === 'APPROVE' ? 'Approved' : 'Rejected'} successfully!`, 'success');
         await loadAllData();
+      } else {
+        showNotification(data.error || 'Could not process payment decision', 'error');
       }
-    } catch (err) {
-      console.error('Error performing admin action:', err);
+    } catch (err: any) {
+      showNotification(`Error: ${err.message}`, 'error');
     }
   };
 
   const handleDeleteCourse = async (courseId: string): Promise<boolean> => {
     try {
-      const res = await fetch(`/api/courses/${courseId}`, {
+      const res = await authFetch(`/api/courses/${courseId}`, {
         method: 'DELETE'
       });
       const data = await res.json();

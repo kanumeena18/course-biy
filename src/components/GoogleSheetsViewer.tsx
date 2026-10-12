@@ -257,20 +257,20 @@ export const GoogleSheetsViewer: React.FC<GoogleSheetsViewerProps> = ({
                 <h3 className="text-sm font-extrabold text-slate-900 tracking-tight">
                   {sheetsStatus?.connected
                     ? 'Google Sheets Live Database Synced'
-                    : 'Google Sheets: Built-in High-Speed Store Mode Active'}
+                    : 'Google Sheets Connection Status'}
                 </h3>
                 <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border shadow-2xs ${
                   sheetsStatus?.connected
                     ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                    : 'bg-amber-50 text-amber-800 border-amber-200'
+                    : 'bg-rose-50 text-rose-800 border-rose-200'
                 }`}>
-                  {sheetsStatus?.connected ? 'Connected' : 'Fallback Cache'}
+                  {sheetsStatus?.connected ? 'Connected' : 'Permission Required'}
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-1 leading-relaxed font-medium">
                 {sheetsStatus?.connected
-                  ? 'Changes automatically sync in real-time to Google Sheets across Courses, Purchases, Settings, and Admins tabs.'
-                  : (sheetsStatus?.lastSyncError || 'Spreadsheet not yet linked. The app is serving courses and purchases reliably from memory.')}
+                  ? 'Connected directly to your Google Sheet. Real-time synchronization active for Courses, Purchases, Settings, and Admins.'
+                  : (sheetsStatus?.lastSyncError || 'Google Sheet not yet accessible by Service Account. Share the spreadsheet with your service account email as Editor.')}
               </p>
             </div>
           </div>

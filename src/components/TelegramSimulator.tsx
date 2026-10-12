@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Send, Image as ImageIcon, CheckCircle, XCircle, AlertCircle, RefreshCw, QrCode, Lock, Download, ExternalLink, ShieldCheck, UserCheck, Smartphone, BellRing, Shield, User } from 'lucide-react';
 import { Course, Purchase, AdminUser } from '../types/index.js';
+import { authFetch } from '../services/apiClient.js';
 
 interface Message {
   id: string;
@@ -182,8 +183,8 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
           text: `🔔 <b>NEW PAYMENT SUBMITTED</b>\n\n👤 <b>Customer:</b> @${p.telegramUsername || 'student_demo'} (${p.customerName})\n🆔 <b>Telegram ID:</b> <code>${p.telegramUserId}</code>\n🎓 <b>Course:</b> ${p.courseName} (ID: ${p.courseId})\n💰 <b>Amount:</b> ${configData.currency}${p.amount}\n⏳ <b>Status:</b> PAYMENT_SUBMITTED\n\n⚠️ <i>Check your bank/UPI app before approving!</i>`,
           timestamp: new Date(p.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           buttons: [
-            { label: '✅ APPROVE PAYMENT', action: `admin_approve_${p.telegramUserId}_${p.courseId}` },
-            { label: '❌ REJECT PAYMENT', action: `admin_reject_${p.telegramUserId}_${p.courseId}` }
+            { label: '✅ APPROVE PAYMENT', action: `admin_approve_${p.paymentId || `${p.telegramUserId}_${p.courseId}`}` },
+            { label: '❌ REJECT PAYMENT', action: `admin_reject_${p.paymentId || `${p.telegramUserId}_${p.courseId}`}` }
           ]
         });
       }
@@ -448,24 +449,32 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
 
     // Admin approval
     if (action.startsWith('admin_approve_')) {
-      const parts = action.replace('admin_approve_', '').split('_');
-      const userId = parts[0];
-      const courseId = parts[1];
+      const payload = action.replace('admin_approve_', '');
+      let paymentId: string | undefined = undefined;
+      let userId: string | undefined = undefined;
+      let courseId: string | undefined = undefined;
+
+      if (payload.startsWith('PAY-') || !payload.includes('_')) {
+        paymentId = payload;
+      } else {
+        const parts = payload.split('_');
+        userId = parts[0];
+        courseId = parts.slice(1).join('_');
+      }
 
       const activeAdmin = (actingAdminId && adminsById.get(actingAdminId)) || admins[0];
       const adminId = activeAdmin?.telegramId || '8293894004';
       const adminName = activeAdmin?.name ? `${activeAdmin.name} (@${activeAdmin.username || 'admin'})` : '@StoreOwner';
 
       try {
-        const res = await fetch('/api/admin-action', {
+        const res = await authFetch('/api/admin-action', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId, courseId, action: 'APPROVE', adminId, adminName })
+          body: JSON.stringify({ userId, courseId, paymentId, action: 'APPROVE', adminId, adminName })
         });
         const data = await res.json();
 
         if (data.alreadyProcessed) {
-          alert(`⚠️ ${data.error || 'This payment was already processed by another admin.'}`);
           setAdminMessages(prev =>
             prev.map(m => {
               if (m.buttons?.some(b => b.action.includes(action))) {
@@ -500,12 +509,13 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
           );
 
           // Deliver to customer
-          const course = coursesById.get(courseId.toLowerCase());
+          const deliveredCourseId = data.purchase?.courseId || courseId;
+          const course = deliveredCourseId ? coursesById.get(deliveredCourseId.toLowerCase()) : undefined;
           addCustomerMessage({
             sender: 'bot',
-            text: `✅ <b>PAYMENT VERIFIED</b>\n\nThank you for your payment!\n\n🎓 <b>Course:</b> ${course?.courseName}\n\n📥 <b>COURSE DOWNLOAD:</b>\nClick the button below to open Google Drive.\n\n🔐 <b>ZIP PASSWORD:</b>\n<code>${course?.zipPassword}</code>\n\n📌 <i>Download the ZIP file and use the password above to extract it. Keep this message safe for future access.</i>`,
+            text: `✅ <b>PAYMENT VERIFIED</b>\n\nThank you for your payment!\n\n🎓 <b>Course:</b> ${course?.courseName || data.purchase?.courseName || 'Your Course'}\n\n📥 <b>COURSE DOWNLOAD:</b>\nClick the button below to open Google Drive.\n\n🔐 <b>ZIP PASSWORD:</b>\n<code>${course?.zipPassword || data.delivery?.zipPassword || 'Password123'}</code>\n\n📌 <i>Download the ZIP file and use the password above to extract it. Keep this message safe for future access.</i>`,
             buttons: [
-              { label: '📥 Download Course from Google Drive', action: 'open_drive', url: course?.driveLink },
+              { label: '📥 Download Course from Google Drive', action: 'open_drive', url: course?.driveLink || data.delivery?.driveLink },
               { label: '🛒 View All My Purchases', action: 'my_purchases' }
             ]
           });
@@ -518,24 +528,32 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
 
     // Admin rejection
     if (action.startsWith('admin_reject_')) {
-      const parts = action.replace('admin_reject_', '').split('_');
-      const userId = parts[0];
-      const courseId = parts[1];
+      const payload = action.replace('admin_reject_', '');
+      let paymentId: string | undefined = undefined;
+      let userId: string | undefined = undefined;
+      let courseId: string | undefined = undefined;
+
+      if (payload.startsWith('PAY-') || !payload.includes('_')) {
+        paymentId = payload;
+      } else {
+        const parts = payload.split('_');
+        userId = parts[0];
+        courseId = parts.slice(1).join('_');
+      }
 
       const activeAdmin = (actingAdminId && adminsById.get(actingAdminId)) || admins[0];
       const adminId = activeAdmin?.telegramId || '8293894004';
       const adminName = activeAdmin?.name ? `${activeAdmin.name} (@${activeAdmin.username || 'admin'})` : '@StoreOwner';
 
       try {
-        const res = await fetch('/api/admin-action', {
+        const res = await authFetch('/api/admin-action', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId, courseId, action: 'REJECT', adminId, adminName })
+          body: JSON.stringify({ userId, courseId, paymentId, action: 'REJECT', adminId, adminName })
         });
         const data = await res.json();
 
         if (data.alreadyProcessed) {
-          alert(`⚠️ ${data.error || 'This payment was already processed by another admin.'}`);
           setAdminMessages(prev =>
             prev.map(m => {
               if (m.buttons?.some(b => b.action.includes(action))) {
@@ -569,11 +587,9 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
             })
           );
 
-          // Deliver rejection notice to customer
-          const course = coursesById.get(courseId.toLowerCase());
           addCustomerMessage({
             sender: 'bot',
-            text: `❌ <b>PAYMENT NOT VERIFIED</b>\n\nYour payment submission for <b>${course?.courseName}</b> could not be verified in our bank account.\n\nIf you believe there was an error or money was deducted, please contact our support team:\n💬 Support: ${configData.supportUsername}`
+            text: `❌ <b>PAYMENT REJECTION NOTICE</b>\n\nYour recent payment could not be verified in our bank account.\n\n<b>Possible Reasons:</b>\n• UPI transaction reference is not visible on the screenshot\n• Amount was not credited to our UPI ID\n• Screenshot is blurry or incomplete\n\nIf you have already paid, please contact support: <b>${configData.supportUsername}</b> with your bank UTR / reference number.`
           });
         }
       } catch (e) {
@@ -702,7 +718,7 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
 
     // Save to server/Sheets API
     try {
-      const res = await fetch('/api/simulate-purchase', {
+      const res = await authFetch('/api/simulate-purchase', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -726,8 +742,8 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
           text: `🔔 <b>NEW PAYMENT SUBMITTED</b>\n\n👤 <b>Customer:</b> @student_rahul (Rahul Verma)\n🆔 <b>Telegram ID:</b> <code>987654321</code>\n🎓 <b>Course:</b> ${selectedCourse.courseName} (ID: ${selectedCourse.courseId})\n💰 <b>Amount:</b> ${configData.currency}${selectedCourse.price}\n⏳ <b>Status:</b> PAYMENT_SUBMITTED\n\n⚠️ <i>Check your bank/UPI app before approving!</i>`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           buttons: [
-            { label: '✅ APPROVE PAYMENT', action: `admin_approve_987654321_${selectedCourse.courseId}` },
-            { label: '❌ REJECT PAYMENT', action: `admin_reject_987654321_${selectedCourse.courseId}` }
+            { label: '✅ APPROVE PAYMENT', action: `admin_approve_${data.purchase?.paymentId || `987654321_${selectedCourse.courseId}`}` },
+            { label: '❌ REJECT PAYMENT', action: `admin_reject_${data.purchase?.paymentId || `987654321_${selectedCourse.courseId}`}` }
           ]
         };
 

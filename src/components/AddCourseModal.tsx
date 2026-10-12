@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Plus, Sparkles, Check, Sheet, Image as ImageIcon, ExternalLink, RefreshCw, AlertCircle, Trash2 } from 'lucide-react';
 import { Course } from '../types/index.js';
+import { authFetch } from '../services/apiClient.js';
 
 interface AddCourseModalProps {
   isOpen: boolean;
@@ -104,7 +105,7 @@ export const AddCourseModal: React.FC<AddCourseModalProps> = ({
         : '/api/courses';
       const method = courseToEdit ? 'PUT' : 'POST';
 
-      const res = await fetch(endpoint, {
+      const res = await authFetch(endpoint, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData)

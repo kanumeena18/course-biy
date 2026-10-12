@@ -455,20 +455,20 @@ async function notifyAllAdminsNewPayment(
         const sentMsg = await ctx.telegram.sendPhoto(admin.telegramId, data.fileId, {
           caption: adminText,
           parse_mode: 'HTML',
-          ...keyboards.adminApproval(data.userId, data.courseId, data.paymentId)
+          ...keyboards.adminApproval(data.paymentId)
         });
         notificationRecords.push({
           adminId: admin.telegramId,
           chatId: admin.telegramId,
           messageId: sentMsg.message_id
         });
-        console.log(`✅ [Admin Alert] Payment notification sent to admin ${admin.name} (${admin.telegramId})`);
+        console.log(`✅ [Admin Alert] Payment notification sent to admin ${admin.name} (${admin.telegramId}) with ID ${data.paymentId}`);
       } catch (err: any) {
         console.warn(`⚠️ [Admin Alert] Photo send to admin ${admin.name} (${admin.telegramId}) failed (${err.message}). Trying text message fallback...`);
         try {
           const sentMsg = await ctx.telegram.sendMessage(admin.telegramId, adminText, {
             parse_mode: 'HTML',
-            ...keyboards.adminApproval(data.userId, data.courseId, data.paymentId)
+            ...keyboards.adminApproval(data.paymentId)
           });
           notificationRecords.push({
             adminId: admin.telegramId,

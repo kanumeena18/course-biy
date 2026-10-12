@@ -184,18 +184,24 @@ export function createBot(token = config.botToken): Telegraf<Context> | null {
   });
 
   // Admin Approval Action: admin_approve_{userId}_{courseId}_{paymentId?}
-  bot.action(/^admin_approve_([a-zA-Z0-9_-]+)_([a-zA-Z0-9_-]+)(?:_([a-zA-Z0-9_-]+))?$/, async (ctx) => {
-    const userId = ctx.match[1];
-    const courseId = ctx.match[2];
-    const paymentId = ctx.match[3];
+  bot.action(/^admin_approve_(.+)$/, async (ctx) => {
+    const rawPayload = ctx.match[1];
+    const parts = rawPayload.split('_');
+    const userId = parts[0];
+    const courseId = parts[1];
+    const paymentId = parts.slice(2).join('_') || undefined;
+    console.log(`🔘 [Telegram Callback] Parsed approve button: userId="${userId}", courseId="${courseId}", paymentId="${paymentId || 'none'}"`);
     await handleAdminApprove(ctx, userId, courseId, paymentId);
   });
 
   // Admin Rejection Action: admin_reject_{userId}_{courseId}_{paymentId?}
-  bot.action(/^admin_reject_([a-zA-Z0-9_-]+)_([a-zA-Z0-9_-]+)(?:_([a-zA-Z0-9_-]+))?$/, async (ctx) => {
-    const userId = ctx.match[1];
-    const courseId = ctx.match[2];
-    const paymentId = ctx.match[3];
+  bot.action(/^admin_reject_(.+)$/, async (ctx) => {
+    const rawPayload = ctx.match[1];
+    const parts = rawPayload.split('_');
+    const userId = parts[0];
+    const courseId = parts[1];
+    const paymentId = parts.slice(2).join('_') || undefined;
+    console.log(`🔘 [Telegram Callback] Parsed reject button: userId="${userId}", courseId="${courseId}", paymentId="${paymentId || 'none'}"`);
     await handleAdminReject(ctx, userId, courseId, paymentId);
   });
 

@@ -69,9 +69,14 @@ app.get('/api/courses', async (req, res) => {
   try {
     const activeOnly = req.query.all !== 'true';
     const courses = await googleSheetsService.getCourses(activeOnly);
-    res.json({ success: true, courses });
+    res.json({
+      success: true,
+      courses,
+      connected: googleSheetsService.getStatus().connected,
+      error: googleSheetsService.getStatus().lastSyncError
+    });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: err.message, courses: [] });
   }
 });
 
@@ -207,6 +212,16 @@ app.get('/api/raw-sheets', async (req, res) => {
   try {
     const raw = googleSheetsService.getRawData();
     res.json({ success: true, data: raw });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/debug-payment/:paymentId', async (req, res) => {
+  try {
+    const { paymentId } = req.params;
+    const diagnostic = await googleSheetsService.debugPayment(paymentId);
+    res.json({ success: true, diagnostic });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -424,6 +439,21 @@ process.once('SIGINT', handleShutdown);
 process.once('SIGTERM', handleShutdown);
 
 async function startServer() {
+  console.log('🔄 Initializing Google Sheets connection...');
+  try {
+    const isConnected = await googleSheetsService.initializeSheets();
+    if (isConnected) {
+      console.log('✅ Google Sheets connection initialized and synchronized.');
+    } else {
+      const status = googleSheetsService.getStatus();
+      if (status.lastSyncError) {
+        console.warn('ℹ️ Google Sheets initial status:', status.lastSyncError);
+      }
+    }
+  } catch (err: any) {
+    console.warn('⚠️ Google Sheets initialization notice:', err.message);
+  }
+
   const isProduction = process.env.NODE_ENV === 'production';
 
   if (!isProduction) {

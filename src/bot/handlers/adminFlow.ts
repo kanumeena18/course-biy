@@ -223,6 +223,7 @@ export async function handlePendingPaymentsList(ctx: Context) {
 
     for (const p of pending) {
       const text = messages.adminPaymentNotification({
+        paymentId: p.paymentId,
         telegramUserId: p.telegramUserId,
         telegramUsername: p.telegramUsername,
         customerName: p.customerName,
@@ -236,7 +237,7 @@ export async function handlePendingPaymentsList(ctx: Context) {
           await ctx.replyWithPhoto(p.paymentScreenshotFileId, {
             caption: text,
             parse_mode: 'HTML',
-            ...keyboards.adminApproval(p.telegramUserId, p.courseId)
+            ...keyboards.adminApproval(p.telegramUserId, p.courseId, p.paymentId)
           });
           // Small pause to prevent Telegram flood limits
           await new Promise(r => setTimeout(r, 60));
@@ -248,7 +249,7 @@ export async function handlePendingPaymentsList(ctx: Context) {
 
       await ctx.reply(text, {
         parse_mode: 'HTML',
-        ...keyboards.adminApproval(p.telegramUserId, p.courseId)
+        ...keyboards.adminApproval(p.telegramUserId, p.courseId, p.paymentId)
       });
       await new Promise(r => setTimeout(r, 60));
     }

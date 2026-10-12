@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Shield, User, Hash, AtSign, Check, AlertCircle, Sparkles, HelpCircle } from 'lucide-react';
 import { AdminUser, AdminRole } from '../types/index.js';
+import { authFetch } from '../services/apiClient.js';
 
 interface AddAdminModalProps {
   isOpen: boolean;
@@ -101,7 +102,7 @@ export const AddAdminModal: React.FC<AddAdminModalProps> = ({
 
     try {
       if (isEditing && adminToEdit) {
-        const res = await fetch(`/api/admins/${adminToEdit.telegramId}`, {
+        const res = await authFetch(`/api/admins/${adminToEdit.telegramId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -117,7 +118,7 @@ export const AddAdminModal: React.FC<AddAdminModalProps> = ({
           throw new Error(data.error || 'Failed to update admin details');
         }
       } else {
-        const res = await fetch('/api/admins', {
+        const res = await authFetch('/api/admins', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

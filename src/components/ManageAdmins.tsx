@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { AdminUser, AdminRole } from '../types/index.js';
 import { AddAdminModal } from './AddAdminModal.js';
+import { authFetch } from '../services/apiClient.js';
 
 interface ManageAdminsProps {
   admins: AdminUser[];
@@ -86,7 +87,7 @@ export const ManageAdmins: React.FC<ManageAdminsProps> = ({
 
     setIsDeleting(true);
     try {
-      const res = await fetch(`/api/admins/${adminToDelete.telegramId}`, {
+      const res = await authFetch(`/api/admins/${adminToDelete.telegramId}`, {
         method: 'DELETE'
       });
       const data = await res.json();
@@ -118,7 +119,7 @@ export const ManageAdmins: React.FC<ManageAdminsProps> = ({
     const newStatus = adminToToggleStatus.status === 'Active' ? 'Inactive' : 'Active';
 
     try {
-      const res = await fetch(`/api/admins/${adminToToggleStatus.telegramId}`, {
+      const res = await authFetch(`/api/admins/${adminToToggleStatus.telegramId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus })

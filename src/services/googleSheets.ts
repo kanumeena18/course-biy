@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { google, sheets_v4 } from 'googleapis';
 import { config } from '../config/config.js';
-import { Course, Purchase, AdminUser, SettingItem, PurchaseStatus } from '../types/index.js';
+import { Course, Purchase, AdminUser, AdminRole, SettingItem, PurchaseStatus } from '../types/index.js';
 import { systemLogger } from './logger.js';
 
 // Default courses: Empty by default. Courses must be manually added via Admin Panel.
@@ -65,6 +65,14 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operationName: s
   });
 }
 
+export interface CourseSearchItem {
+  course: Course;
+  nameLower: string;
+  creatorLower: string;
+  descLower: string;
+  combinedTokens: string;
+}
+
 export class GoogleSheetsService {
   private sheetsClient: sheets_v4.Sheets | null = null;
   private isConnected = false;
@@ -75,6 +83,30 @@ export class GoogleSheetsService {
   private purchasesCache: Purchase[] = [...DEFAULT_PURCHASES];
   private settingsCache: SettingItem[] = [...DEFAULT_SETTINGS];
   private adminsCache: AdminUser[] = [...DEFAULT_ADMINS];
+
+  // High-performance O(1) Indexed Maps & Pre-calculated Caches
+  private courseByIdMap = new Map<string, Course>();
+  private activeCoursesCache: Course[] = [];
+  private coursesSearchIndex: CourseSearchItem[] = [];
+  private searchCache = new Map<string, { results: Course[]; timestamp: number }>();
+
+  private purchasesByUserMap = new Map<string, Purchase[]>();
+  private purchaseByPaymentIdMap = new Map<string, Purchase>();
+  private pendingPurchasesCache: Purchase[] = [];
+
+  private settingsMap = new Map<string, string>();
+
+  private adminByTelegramIdMap = new Map<string, AdminUser>();
+  private activeAdminIdsSet = new Set<string>();
+
+  // Cached statistics with 10s TTL or write-through invalidation
+  private cachedStats: any = null;
+  private statsCacheTime = 0;
+
+  // Google Sheets Row Index Tracking to eliminate slow full table scans on row updates
+  private purchaseRowIndexMap = new Map<string, number>();
+  private courseRowIndexMap = new Map<string, number>();
+  private adminRowIndexMap = new Map<string, number>();
 
   // Cache timestamps for stale-while-revalidate
   private lastCoursesFetch = 0;
@@ -96,9 +128,109 @@ export class GoogleSheetsService {
   private isFetchingAdmins = false;
 
   constructor() {
+    this.rebuildCoursesIndex();
+    this.rebuildPurchasesIndex();
+    this.rebuildSettingsIndex();
+    this.rebuildAdminsIndex();
+
     this.initClient().catch(err => {
       console.warn('ℹ️ [DB] Google Sheets client init notice:', (err as Error).message);
     });
+  }
+
+  // Fast internal index builders
+  private rebuildCoursesIndex(): void {
+    const byId = new Map<string, Course>();
+    const active: Course[] = [];
+    const searchIdx: CourseSearchItem[] = [];
+
+    for (let i = 0; i < this.coursesCache.length; i++) {
+      const c = this.coursesCache[i];
+      const idKey = c.courseId.toLowerCase();
+      byId.set(idKey, c);
+
+      if (c.status.toLowerCase() === 'active') {
+        active.push(c);
+        const nameLower = c.courseName.toLowerCase();
+        const creatorLower = (c.creatorName || '').toLowerCase();
+        const descLower = (c.description || '').toLowerCase();
+        searchIdx.push({
+          course: c,
+          nameLower,
+          creatorLower,
+          descLower,
+          combinedTokens: `${nameLower} ${creatorLower} ${descLower}`
+        });
+      }
+    }
+
+    this.courseByIdMap = byId;
+    this.activeCoursesCache = active;
+    this.coursesSearchIndex = searchIdx;
+    this.searchCache.clear();
+    this.cachedStats = null;
+  }
+
+  private rebuildPurchasesIndex(): void {
+    const byUser = new Map<string, Purchase[]>();
+    const byPid = new Map<string, Purchase>();
+    const pending: Purchase[] = [];
+
+    for (let i = 0; i < this.purchasesCache.length; i++) {
+      const p = this.purchasesCache[i];
+      if (p.paymentId) {
+        byPid.set(p.paymentId, p);
+      }
+      const uid = p.telegramUserId;
+      if (!byUser.has(uid)) {
+        byUser.set(uid, [p]);
+      } else {
+        byUser.get(uid)!.push(p);
+      }
+      if (p.status === 'PAYMENT_SUBMITTED') {
+        pending.push(p);
+      }
+    }
+
+    this.purchasesByUserMap = byUser;
+    this.purchaseByPaymentIdMap = byPid;
+    this.pendingPurchasesCache = pending;
+    this.cachedStats = null;
+  }
+
+  private rebuildSettingsIndex(): void {
+    const map = new Map<string, string>();
+    for (let i = 0; i < this.settingsCache.length; i++) {
+      const s = this.settingsCache[i];
+      if (s.key) {
+        map.set(s.key.toUpperCase(), s.value);
+      }
+    }
+    this.settingsMap = map;
+  }
+
+  private rebuildAdminsIndex(): void {
+    const byTid = new Map<string, AdminUser>();
+    const activeSet = new Set<string>();
+
+    for (let i = 0; i < this.adminsCache.length; i++) {
+      const a = this.adminsCache[i];
+      const tid = a.telegramId.trim();
+      if (tid) {
+        byTid.set(tid, a);
+        if (a.status.toLowerCase() === 'active') {
+          activeSet.add(tid);
+        }
+      }
+    }
+
+    // Always include config owner in active set
+    if (config.adminTelegramId) {
+      activeSet.add(config.adminTelegramId.trim());
+    }
+
+    this.adminByTelegramIdMap = byTid;
+    this.activeAdminIdsSet = activeSet;
   }
 
   public async initializeSheets(): Promise<boolean> {
@@ -298,11 +430,15 @@ export class GoogleSheetsService {
         this.lastSyncError = null;
         console.log(`✅ [DB] Google Sheets API v4 connected to spreadsheet: "${testRes.data.properties?.title || config.googleSheetId}"`);
 
-        // Warm up cache in background non-blocking only if connected successfully
+        // Warm up all data sheets concurrently in background upon successful connection
         setTimeout(() => {
-          this.refreshCoursesFromGoogle().catch(() => {});
-          this.refreshPurchasesFromGoogle().catch(() => {});
-        }, 500);
+          Promise.allSettled([
+            this.refreshCoursesFromGoogle(),
+            this.refreshPurchasesFromGoogle(),
+            this.refreshSettingsFromGoogle(),
+            this.refreshAdminsFromGoogle()
+          ]);
+        }, 200);
 
         return true;
       } catch (verifyErr: any) {
@@ -362,6 +498,14 @@ export class GoogleSheetsService {
       const response = await withTimeout(fetchPromise, this.API_TIMEOUT, 'fetchCoursesFromGoogle');
       const rows = response.data.values || [];
 
+      // Map rows and track row indices
+      rows.forEach((row, i) => {
+        const cid = String(row[0] || '').trim().toLowerCase();
+        if (cid) {
+          this.courseRowIndexMap.set(cid, i + 2);
+        }
+      });
+
       const fetchedCourses: Course[] = rows.map((row) => ({
         courseId: String(row[0] || '').trim(),
         courseName: String(row[1] || '').trim(),
@@ -379,6 +523,7 @@ export class GoogleSheetsService {
       })).filter(c => c.courseId && c.courseName);
 
       this.coursesCache = fetchedCourses;
+      this.rebuildCoursesIndex();
       this.lastCoursesFetch = Date.now();
       this.lastSyncError = null;
     } catch (err: any) {
@@ -391,43 +536,63 @@ export class GoogleSheetsService {
 
   public async getCourses(activeOnly = true): Promise<Course[]> {
     const now = Date.now();
-    // If cache is stale and not already refreshing, trigger background revalidation
+    // Non-blocking background revalidation if stale
     if (this.isConnected && (now - this.lastCoursesFetch > this.COURSES_TTL)) {
       this.refreshCoursesFromGoogle().catch(() => {});
     }
 
-    // Return instant memory cache in < 1ms
+    // Return instant memory cache in < 0.1ms without array allocation
     if (activeOnly) {
-      return this.coursesCache.filter(c => c.status.toLowerCase() === 'active');
+      return this.activeCoursesCache;
     }
     return this.coursesCache;
   }
 
   public async getCourseById(courseId: string): Promise<Course | null> {
-    const courses = await this.getCourses(false);
-    return courses.find(c => c.courseId.toLowerCase() === courseId.toLowerCase()) || null;
+    const now = Date.now();
+    if (this.isConnected && (now - this.lastCoursesFetch > this.COURSES_TTL)) {
+      this.refreshCoursesFromGoogle().catch(() => {});
+    }
+    // Instant O(1) Map lookup in < 0.01ms
+    return this.courseByIdMap.get(courseId.toLowerCase()) || null;
   }
 
   public async searchCourses(query: string): Promise<Course[]> {
-    const courses = await this.getCourses(true);
+    const now = Date.now();
+    if (this.isConnected && (now - this.lastCoursesFetch > this.COURSES_TTL)) {
+      this.refreshCoursesFromGoogle().catch(() => {});
+    }
+
     const cleanQuery = query.trim().toLowerCase();
-    if (!cleanQuery) return courses;
+    if (!cleanQuery) return this.activeCoursesCache;
+
+    // Fast-path search cache
+    const cached = this.searchCache.get(cleanQuery);
+    if (cached && (now - cached.timestamp < 30_000)) {
+      return cached.results;
+    }
 
     const queryWords = cleanQuery.split(/\s+/).filter(Boolean);
+    const results: Course[] = [];
 
-    return courses.filter(c => {
-      const name = c.courseName.toLowerCase();
-      const creator = c.creatorName.toLowerCase();
-      const desc = c.description.toLowerCase();
-
-      // Direct exact or substring match
-      if (name.includes(cleanQuery) || creator.includes(cleanQuery)) {
-        return true;
+    // Fast tokenized search across pre-computed lowercase tokens
+    for (let i = 0; i < this.coursesSearchIndex.length; i++) {
+      const item = this.coursesSearchIndex[i];
+      if (item.nameLower.includes(cleanQuery) || item.creatorLower.includes(cleanQuery)) {
+        results.push(item.course);
+        continue;
       }
+      if (queryWords.every(word => item.combinedTokens.includes(word))) {
+        results.push(item.course);
+      }
+    }
 
-      // Word tokens matching
-      return queryWords.every(word => name.includes(word) || creator.includes(word) || desc.includes(word));
-    });
+    if (this.searchCache.size > 200) {
+      this.searchCache.clear();
+    }
+    this.searchCache.set(cleanQuery, { results, timestamp: now });
+
+    return results;
   }
 
   // ==========================================
@@ -447,6 +612,14 @@ export class GoogleSheetsService {
 
       const response = await withTimeout(fetchPromise, this.API_TIMEOUT, 'fetchPurchasesFromGoogle');
       const rows = response.data.values || [];
+
+      // Record Google Sheets row indices for instant updates
+      rows.forEach((row, i) => {
+        const pid = String(row[0] || '').trim();
+        if (pid) {
+          this.purchaseRowIndexMap.set(pid, i + 2);
+        }
+      });
 
       const fetchedPurchases: Purchase[] = rows.map((row, i) => {
         const isNewFormat = String(row[0] || '').startsWith('PAY-') || row.length >= 12;
@@ -501,6 +674,7 @@ export class GoogleSheetsService {
 
       if (fetchedPurchases.length > 0) {
         this.purchasesCache = fetchedPurchases;
+        this.rebuildPurchasesIndex();
         this.lastPurchasesFetch = Date.now();
         this.lastSyncError = null;
       }
@@ -519,27 +693,40 @@ export class GoogleSheetsService {
     }
 
     if (userId) {
-      return this.purchasesCache.filter(p => p.telegramUserId === String(userId));
+      return this.purchasesByUserMap.get(String(userId)) || [];
     }
     return this.purchasesCache;
   }
 
   public async getPendingPurchases(): Promise<Purchase[]> {
-    const all = await this.getPurchases();
-    return all.filter(p => p.status === 'PAYMENT_SUBMITTED');
+    const now = Date.now();
+    if (this.isConnected && (now - this.lastPurchasesFetch > this.PURCHASES_TTL)) {
+      this.refreshPurchasesFromGoogle().catch(() => {});
+    }
+    return this.pendingPurchasesCache;
   }
 
   public async getPurchaseByUserAndCourse(userId: string, courseId: string, paymentId?: string): Promise<Purchase | null> {
-    const purchases = await this.getPurchases();
+    const now = Date.now();
+    if (this.isConnected && (now - this.lastPurchasesFetch > this.PURCHASES_TTL)) {
+      this.refreshPurchasesFromGoogle().catch(() => {});
+    }
+
     if (paymentId) {
-      const found = purchases.find(p => p.paymentId === paymentId);
+      const found = this.purchaseByPaymentIdMap.get(paymentId);
       if (found) return found;
     }
-    const matching = purchases.filter(
-      p => p.telegramUserId === String(userId) && p.courseId.toLowerCase() === courseId.toLowerCase()
-    );
-    if (matching.length === 0) return null;
-    return matching[matching.length - 1];
+
+    const userPurchases = this.purchasesByUserMap.get(String(userId));
+    if (!userPurchases || userPurchases.length === 0) return null;
+
+    const cid = courseId.toLowerCase();
+    for (let i = userPurchases.length - 1; i >= 0; i--) {
+      if (userPurchases[i].courseId.toLowerCase() === cid) {
+        return userPurchases[i];
+      }
+    }
+    return null;
   }
 
   public async recordPurchaseSubmission(purchase: {
@@ -587,6 +774,7 @@ export class GoogleSheetsService {
     } else {
       this.purchasesCache.unshift(newRecord);
     }
+    this.rebuildPurchasesIndex();
 
     // Non-blocking write to Google Sheet with timeout
     if (this.isConnected && this.sheetsClient && config.googleSheetId) {
@@ -617,7 +805,15 @@ export class GoogleSheetsService {
         }),
         this.API_TIMEOUT,
         'appendPurchaseToGoogle'
-      ).catch(err => {
+      ).then(appendRes => {
+        const updatedRange = appendRes.data?.updates?.updatedRange;
+        if (updatedRange) {
+          const match = updatedRange.match(/!A(\d+):/);
+          if (newRecord.paymentId && match && match[1]) {
+            this.purchaseRowIndexMap.set(newRecord.paymentId, parseInt(match[1], 10));
+          }
+        }
+      }).catch(err => {
         this.handleGoogleApiError('Non-blocking append purchase', err);
       });
     }
@@ -637,6 +833,7 @@ export class GoogleSheetsService {
     );
     if (idx >= 0) {
       this.purchasesCache[idx].adminNotificationMessageIds = notifications;
+      this.rebuildPurchasesIndex();
     }
   }
 
@@ -724,14 +921,49 @@ export class GoogleSheetsService {
       };
 
       this.purchasesCache[targetIndex] = updated;
+      this.rebuildPurchasesIndex();
 
-      // Sync with Google Sheets asynchronously
+      // Sync with Google Sheets asynchronously (direct update if row index is known)
       if (this.isConnected && this.sheetsClient && config.googleSheetId) {
         const sheets = this.sheetsClient;
         const sheetId = config.googleSheetId;
 
         (async () => {
           try {
+            const rowValues = [[
+              updated.paymentId || `PAY-${targetIndex + 1}`,
+              updated.telegramUserId,
+              updated.customerName,
+              updated.courseId,
+              updated.courseName,
+              updated.amount,
+              updated.paymentScreenshotFileId,
+              updated.createdAt,
+              updated.status,
+              updated.processedByAdminId || adminId,
+              updated.processedByAdminName || resolvedAdminName,
+              updated.decision || decisionText,
+              updated.decisionTimestamp || now,
+              updated.rejectionReason || '',
+              updated.accessDeliveryStatus || ''
+            ]];
+
+            const knownRow = pid ? this.purchaseRowIndexMap.get(pid) : undefined;
+            if (knownRow) {
+              await withTimeout(
+                sheets.spreadsheets.values.update({
+                  spreadsheetId: sheetId,
+                  range: `Purchases!A${knownRow}:O${knownRow}`,
+                  valueInputOption: 'USER_ENTERED',
+                  requestBody: { values: rowValues }
+                }),
+                this.API_TIMEOUT,
+                'directUpdatePurchaseDecisionInGoogle'
+              );
+              return;
+            }
+
+            // Fallback: search row in sheet if index is not cached yet
             const res = await withTimeout(
               sheets.spreadsheets.values.get({
                 spreadsheetId: sheetId,
@@ -749,30 +981,13 @@ export class GoogleSheetsService {
               const matches = (pid && rowPid === pid) || (rowUid === uid && rowCid === cid);
               if (matches) {
                 const rowIndex = i + 2;
+                if (pid) this.purchaseRowIndexMap.set(pid, rowIndex);
                 await withTimeout(
                   sheets.spreadsheets.values.update({
                     spreadsheetId: sheetId,
                     range: `Purchases!A${rowIndex}:O${rowIndex}`,
                     valueInputOption: 'USER_ENTERED',
-                    requestBody: {
-                      values: [[
-                        updated.paymentId || rowPid || `PAY-${rowIndex - 1}`,
-                        updated.telegramUserId,
-                        updated.customerName,
-                        updated.courseId,
-                        updated.courseName,
-                        updated.amount,
-                        updated.paymentScreenshotFileId,
-                        updated.createdAt,
-                        updated.status,
-                        updated.processedByAdminId || adminId,
-                        updated.processedByAdminName || resolvedAdminName,
-                        updated.decision || decisionText,
-                        updated.decisionTimestamp || now,
-                        updated.rejectionReason || '',
-                        updated.accessDeliveryStatus || ''
-                      ]]
-                    }
+                    requestBody: { values: rowValues }
                   }),
                   this.API_TIMEOUT,
                   'updatePurchaseDecisionInGoogle'
@@ -823,54 +1038,66 @@ export class GoogleSheetsService {
   // ==========================================
   // MULTI-ADMIN MANAGEMENT (Synchronized with Google Sheets)
   // ==========================================
-  public async getAdmins(): Promise<AdminUser[]> {
-    const now = Date.now();
-    if (this.isConnected && (now - this.lastAdminsFetch > this.ADMINS_TTL) && !this.isFetchingAdmins) {
-      this.isFetchingAdmins = true;
-      withTimeout(
-        this.sheetsClient!.spreadsheets.values.get({
+  private async refreshAdminsFromGoogle(): Promise<void> {
+    if (!this.isConnected || !this.sheetsClient || !config.googleSheetId || this.isFetchingAdmins) {
+      return;
+    }
+    this.isFetchingAdmins = true;
+    try {
+      const res = await withTimeout(
+        this.sheetsClient.spreadsheets.values.get({
           spreadsheetId: config.googleSheetId,
           range: 'Admins!A2:I'
         }),
         this.API_TIMEOUT,
         'fetchAdminsFromGoogle'
-      ).then(res => {
-        const rows = res.data.values || [];
-        const fetched = rows.map((r, i) => {
-          if (r.length >= 5) {
-            return {
-              adminId: String(r[0] || `ADM-${i + 1}`).trim(),
-              name: String(r[1] || '').trim(),
-              telegramId: String(r[2] || '').trim(),
-              username: String(r[3] || '').trim(),
-              role: (String(r[4] || 'Payment Admin').trim() as any),
-              status: (String(r[5] || 'Active').trim() as 'Active' | 'Inactive'),
-              addedBy: r[6] ? String(r[6]).trim() : 'System',
-              createdAt: r[7] ? String(r[7]).trim() : '2026-10-01',
-              updatedAt: r[8] ? String(r[8]).trim() : undefined
-            };
-          }
-          // Legacy 4-column format
-          return {
-            adminId: `ADM-${i + 1}`,
-            telegramId: String(r[0] || '').trim(),
-            name: String(r[1] || '').trim(),
-            role: (String(r[2] || 'Owner').trim() as any),
-            status: (String(r[3] || 'Active').trim() as 'Active' | 'Inactive'),
-            addedBy: 'System',
-            createdAt: '2026-10-01'
-          };
-        }).filter(a => a.telegramId);
-
-        if (fetched.length > 0) {
-          this.adminsCache = fetched;
-          this.lastAdminsFetch = Date.now();
+      );
+      const rows = res.data.values || [];
+      const fetched = rows.map((r, i) => {
+        const tid = String(r.length >= 5 ? (r[2] || '') : (r[0] || '')).trim();
+        if (tid) {
+          this.adminRowIndexMap.set(tid, i + 2);
         }
-      }).catch(err => {
-        this.handleGoogleApiError('Non-blocking admins fetch', err);
-      }).finally(() => {
-        this.isFetchingAdmins = false;
-      });
+        if (r.length >= 5) {
+          return {
+            adminId: String(r[0] || `ADM-${i + 1}`).trim(),
+            name: String(r[1] || '').trim(),
+            telegramId: tid,
+            username: String(r[3] || '').trim(),
+            role: (String(r[4] || 'Payment Admin').trim() as any),
+            status: (String(r[5] || 'Active').trim() as 'Active' | 'Inactive'),
+            addedBy: r[6] ? String(r[6]).trim() : 'System',
+            createdAt: r[7] ? String(r[7]).trim() : '2026-10-01',
+            updatedAt: r[8] ? String(r[8]).trim() : undefined
+          };
+        }
+        return {
+          adminId: `ADM-${i + 1}`,
+          telegramId: tid,
+          name: String(r[1] || '').trim(),
+          role: (String(r[2] || 'Owner').trim() as any),
+          status: (String(r[3] || 'Active').trim() as 'Active' | 'Inactive'),
+          addedBy: 'System',
+          createdAt: '2026-10-01'
+        };
+      }).filter(a => a.telegramId);
+
+      if (fetched.length > 0) {
+        this.adminsCache = fetched;
+        this.rebuildAdminsIndex();
+        this.lastAdminsFetch = Date.now();
+      }
+    } catch (err: any) {
+      this.handleGoogleApiError('Non-blocking admins fetch', err);
+    } finally {
+      this.isFetchingAdmins = false;
+    }
+  }
+
+  public async getAdmins(): Promise<AdminUser[]> {
+    const now = Date.now();
+    if (this.isConnected && (now - this.lastAdminsFetch > this.ADMINS_TTL) && !this.isFetchingAdmins) {
+      this.refreshAdminsFromGoogle().catch(() => {});
     }
 
     // Guarantee primary owner is present
@@ -888,6 +1115,7 @@ export class GoogleSheetsService {
           createdAt: '2026-10-01',
           updatedAt: '2026-10-01'
         });
+        this.rebuildAdminsIndex();
       }
     }
 
@@ -932,6 +1160,7 @@ export class GoogleSheetsService {
     };
 
     this.adminsCache.push(newAdmin);
+    this.rebuildAdminsIndex();
 
     // Sync to Google Sheet
     if (this.isConnected && this.sheetsClient && config.googleSheetId) {
@@ -956,7 +1185,15 @@ export class GoogleSheetsService {
         }),
         this.API_TIMEOUT,
         'appendAdminToGoogle'
-      ).catch(err => {
+      ).then(appendRes => {
+        const updatedRange = appendRes.data?.updates?.updatedRange;
+        if (updatedRange) {
+          const match = updatedRange.match(/!A(\d+):/);
+          if (match && match[1]) {
+            this.adminRowIndexMap.set(tid, parseInt(match[1], 10));
+          }
+        }
+      }).catch(err => {
         this.handleGoogleApiError('Non-blocking append admin', err);
       });
     }
@@ -1002,6 +1239,7 @@ export class GoogleSheetsService {
     };
 
     this.adminsCache[idx] = updated;
+    this.rebuildAdminsIndex();
 
     // Sync to Google Sheet
     if (this.isConnected && this.sheetsClient && config.googleSheetId) {
@@ -1010,6 +1248,33 @@ export class GoogleSheetsService {
 
       (async () => {
         try {
+          const rowValues = [[
+            updated.adminId || `ADM-${idx + 1}`,
+            updated.name,
+            updated.telegramId,
+            updated.username || '',
+            updated.role,
+            updated.status,
+            updated.addedBy || '',
+            updated.createdAt || '',
+            updated.updatedAt || now
+          ]];
+
+          const knownRow = this.adminRowIndexMap.get(tid);
+          if (knownRow) {
+            await withTimeout(
+              sheets.spreadsheets.values.update({
+                spreadsheetId: sheetId,
+                range: `Admins!A${knownRow}:I${knownRow}`,
+                valueInputOption: 'USER_ENTERED',
+                requestBody: { values: rowValues }
+              }),
+              this.API_TIMEOUT,
+              'directUpdateAdminRowInGoogle'
+            );
+            return;
+          }
+
           const res = await withTimeout(
             sheets.spreadsheets.values.get({
               spreadsheetId: sheetId,
@@ -1023,24 +1288,13 @@ export class GoogleSheetsService {
             const rTid = String(rows[i][2] || rows[i][0] || '').trim();
             if (rTid === tid) {
               const rowIndex = i + 2;
+              this.adminRowIndexMap.set(tid, rowIndex);
               await withTimeout(
                 sheets.spreadsheets.values.update({
                   spreadsheetId: sheetId,
                   range: `Admins!A${rowIndex}:I${rowIndex}`,
                   valueInputOption: 'USER_ENTERED',
-                  requestBody: {
-                    values: [[
-                      updated.adminId || `ADM-${rowIndex - 1}`,
-                      updated.name,
-                      updated.telegramId,
-                      updated.username || '',
-                      updated.role,
-                      updated.status,
-                      updated.addedBy || '',
-                      updated.createdAt || '',
-                      updated.updatedAt || now
-                    ]]
-                  }
+                  requestBody: { values: rowValues }
                 }),
                 this.API_TIMEOUT,
                 'updateAdminRowInGoogle'
@@ -1076,6 +1330,7 @@ export class GoogleSheetsService {
     }
 
     this.adminsCache.splice(idx, 1);
+    this.rebuildAdminsIndex();
 
     // Sync to Google Sheet
     if (this.isConnected && this.sheetsClient && config.googleSheetId) {
@@ -1084,6 +1339,20 @@ export class GoogleSheetsService {
 
       (async () => {
         try {
+          const knownRow = this.adminRowIndexMap.get(tid);
+          if (knownRow) {
+            await withTimeout(
+              sheets.spreadsheets.values.clear({
+                spreadsheetId: sheetId,
+                range: `Admins!A${knownRow}:I${knownRow}`
+              }),
+              this.API_TIMEOUT,
+              'directClearAdminRowInGoogle'
+            );
+            this.adminRowIndexMap.delete(tid);
+            return;
+          }
+
           const res = await withTimeout(
             sheets.spreadsheets.values.get({
               spreadsheetId: sheetId,
@@ -1126,16 +1395,20 @@ export class GoogleSheetsService {
       return true;
     }
 
-    const admins = await this.getAdmins();
-    return admins.some(a => a.telegramId === tid && a.status.toLowerCase() === 'active');
+    const now = Date.now();
+    if (this.isConnected && (now - this.lastAdminsFetch > this.ADMINS_TTL) && !this.isFetchingAdmins) {
+      this.getAdmins().catch(() => {});
+    }
+
+    return this.activeAdminIdsSet.has(tid);
   }
 
   public async isOwner(telegramId: string | number): Promise<boolean> {
     const tid = String(telegramId).trim();
     if (!tid) return false;
     if (config.adminTelegramId && tid === config.adminTelegramId) return true;
-    const admins = await this.getAdmins();
-    return admins.some(a => a.telegramId === tid && a.role === 'Owner' && a.status.toLowerCase() === 'active');
+    const admin = this.adminByTelegramIdMap.get(tid);
+    return Boolean(admin && admin.role === 'Owner' && admin.status.toLowerCase() === 'active');
   }
 
   public async getActiveApprovalAdmins(): Promise<AdminUser[]> {
@@ -1162,69 +1435,109 @@ export class GoogleSheetsService {
     return active;
   }
 
-  public async getSettings(): Promise<SettingItem[]> {
-    const now = Date.now();
-    if (this.isConnected && (now - this.lastSettingsFetch > this.SETTINGS_TTL) && !this.isFetchingSettings) {
-      this.isFetchingSettings = true;
-      withTimeout(
-        this.sheetsClient!.spreadsheets.values.get({
+  // ==========================================
+  // SETTINGS (Cached Read + Fast Map Lookup)
+  // ==========================================
+  private async refreshSettingsFromGoogle(): Promise<void> {
+    if (!this.isConnected || !this.sheetsClient || !config.googleSheetId || this.isFetchingSettings) {
+      return;
+    }
+    this.isFetchingSettings = true;
+    try {
+      const res = await withTimeout(
+        this.sheetsClient.spreadsheets.values.get({
           spreadsheetId: config.googleSheetId,
           range: 'Settings!A2:B'
         }),
         this.API_TIMEOUT,
         'fetchSettingsFromGoogle'
-      ).then(res => {
-        const rows = res.data.values || [];
-        const fetched = rows.map(r => ({
-          key: String(r[0] || '').trim(),
-          value: String(r[1] || '').trim()
-        })).filter(s => s.key);
+      );
+      const rows = res.data.values || [];
+      const fetched = rows.map(r => ({
+        key: String(r[0] || '').trim(),
+        value: String(r[1] || '').trim()
+      })).filter(s => s.key);
 
-        if (fetched.length > 0) {
-          this.settingsCache = fetched;
-          this.lastSettingsFetch = Date.now();
-        }
-      }).catch(err => {
-        this.handleGoogleApiError('Non-blocking settings fetch', err);
-      }).finally(() => {
-        this.isFetchingSettings = false;
-      });
+      if (fetched.length > 0) {
+        this.settingsCache = fetched;
+        this.rebuildSettingsIndex();
+        this.lastSettingsFetch = Date.now();
+      }
+    } catch (err: any) {
+      this.handleGoogleApiError('Non-blocking settings fetch', err);
+    } finally {
+      this.isFetchingSettings = false;
+    }
+  }
+
+  public async getSettings(): Promise<SettingItem[]> {
+    const now = Date.now();
+    if (this.isConnected && (now - this.lastSettingsFetch > this.SETTINGS_TTL) && !this.isFetchingSettings) {
+      this.refreshSettingsFromGoogle().catch(() => {});
     }
 
     return this.settingsCache;
   }
 
   public async getSetting(key: string, defaultValue = ''): Promise<string> {
-    const settings = await this.getSettings();
-    const found = settings.find(s => s.key.toUpperCase() === key.toUpperCase());
-    return found ? found.value : defaultValue;
+    const now = Date.now();
+    if (this.isConnected && (now - this.lastSettingsFetch > this.SETTINGS_TTL) && !this.isFetchingSettings) {
+      this.refreshSettingsFromGoogle().catch(() => {});
+    }
+    const val = this.settingsMap.get(key.toUpperCase());
+    return val !== undefined ? val : defaultValue;
   }
 
   public async getStatistics() {
-    const courses = await this.getCourses(false);
-    const purchases = await this.getPurchases();
+    const now = Date.now();
+    if (this.cachedStats && (now - this.statsCacheTime < 10_000)) {
+      return this.cachedStats;
+    }
 
-    const activeCourses = courses.filter(c => c.status.toLowerCase() === 'active').length;
-    const inactiveCourses = courses.filter(c => c.status.toLowerCase() === 'inactive').length;
+    const courses = this.coursesCache;
+    const purchases = this.purchasesCache;
 
-    const paidPurchases = purchases.filter(p => p.status === 'PAID');
-    const pendingPurchases = purchases.filter(p => p.status === 'PAYMENT_SUBMITTED');
-    const rejectedPurchases = purchases.filter(p => p.status === 'REJECTED');
-    const expiredPurchases = purchases.filter(p => p.status === 'EXPIRED');
+    let activeCourses = 0;
+    let inactiveCourses = 0;
+    for (let i = 0; i < courses.length; i++) {
+      if (courses[i].status.toLowerCase() === 'active') activeCourses++;
+      else inactiveCourses++;
+    }
 
-    const totalRevenue = paidPurchases.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+    let paidCount = 0;
+    let pendingCount = 0;
+    let rejectedCount = 0;
+    let expiredCount = 0;
+    let totalRevenue = 0;
 
-    return {
+    for (let i = 0; i < purchases.length; i++) {
+      const p = purchases[i];
+      if (p.status === 'PAID') {
+        paidCount++;
+        totalRevenue += (Number(p.amount) || 0);
+      } else if (p.status === 'PAYMENT_SUBMITTED') {
+        pendingCount++;
+      } else if (p.status === 'REJECTED') {
+        rejectedCount++;
+      } else if (p.status === 'EXPIRED') {
+        expiredCount++;
+      }
+    }
+
+    this.cachedStats = {
       totalCourses: courses.length,
       activeCourses,
       inactiveCourses,
       totalPurchases: purchases.length,
-      paidPurchasesCount: paidPurchases.length,
-      pendingPurchasesCount: pendingPurchases.length,
-      rejectedPurchasesCount: rejectedPurchases.length,
-      expiredPurchasesCount: expiredPurchases.length,
+      paidPurchasesCount: paidCount,
+      pendingPurchasesCount: pendingCount,
+      rejectedPurchasesCount: rejectedCount,
+      expiredPurchasesCount: expiredCount,
       totalRevenue
     };
+    this.statsCacheTime = now;
+
+    return this.cachedStats;
   }
 
   public async checkExpiredPurchases(expiryHours = config.paymentExpiryHours) {
@@ -1243,12 +1556,17 @@ export class GoogleSheetsService {
       }
     }
 
+    if (expiredCount > 0) {
+      this.rebuildPurchasesIndex();
+    }
+
     return expiredCount;
   }
 
   // Dashboard Simulator Helpers
   public addCourse(course: Course): Course {
     this.coursesCache.push(course);
+    this.rebuildCoursesIndex();
 
     // Also persist to Google Sheets if connected
     if (this.isConnected && this.sheetsClient && config.googleSheetId) {
@@ -1277,7 +1595,15 @@ export class GoogleSheetsService {
         }),
         this.API_TIMEOUT,
         'appendCourseToGoogle'
-      ).catch(err => {
+      ).then(appendRes => {
+        const updatedRange = appendRes.data?.updates?.updatedRange;
+        if (updatedRange) {
+          const match = updatedRange.match(/!A(\d+):/);
+          if (match && match[1]) {
+            this.courseRowIndexMap.set(course.courseId.toLowerCase(), parseInt(match[1], 10));
+          }
+        }
+      }).catch(err => {
         this.handleGoogleApiError('Non-blocking append course', err);
       });
     }
@@ -1295,6 +1621,7 @@ export class GoogleSheetsService {
       ...updates
     };
     this.coursesCache[idx] = updated;
+    this.rebuildCoursesIndex();
 
     // Asynchronous non-blocking Google Sheet update if connected
     if (this.isConnected && this.sheetsClient && config.googleSheetId) {
@@ -1303,6 +1630,37 @@ export class GoogleSheetsService {
 
       (async () => {
         try {
+          const rowValues = [[
+            updated.courseId,
+            updated.courseName,
+            updated.creatorName,
+            updated.price,
+            updated.originalPrice,
+            updated.courseSize,
+            updated.language,
+            updated.driveLink,
+            updated.zipPassword,
+            updated.description,
+            updated.thumbnailUrl || '',
+            updated.status,
+            updated.createdAt
+          ]];
+
+          const knownRow = this.courseRowIndexMap.get(cid);
+          if (knownRow) {
+            await withTimeout(
+              sheets.spreadsheets.values.update({
+                spreadsheetId: sheetId,
+                range: `Courses!A${knownRow}:M${knownRow}`,
+                valueInputOption: 'USER_ENTERED',
+                requestBody: { values: rowValues }
+              }),
+              this.API_TIMEOUT,
+              'directUpdateCourseRowInGoogle'
+            );
+            return;
+          }
+
           const response = await withTimeout(
             sheets.spreadsheets.values.get({
               spreadsheetId: sheetId,
@@ -1317,28 +1675,13 @@ export class GoogleSheetsService {
             const rowCourseId = String(rows[i][0] || '').trim().toLowerCase();
             if (rowCourseId === cid) {
               const sheetRowIndex = i + 2;
+              this.courseRowIndexMap.set(cid, sheetRowIndex);
               await withTimeout(
                 sheets.spreadsheets.values.update({
                   spreadsheetId: sheetId,
                   range: `Courses!A${sheetRowIndex}:M${sheetRowIndex}`,
                   valueInputOption: 'USER_ENTERED',
-                  requestBody: {
-                    values: [[
-                      updated.courseId,
-                      updated.courseName,
-                      updated.creatorName,
-                      updated.price,
-                      updated.originalPrice,
-                      updated.courseSize,
-                      updated.language,
-                      updated.driveLink,
-                      updated.zipPassword,
-                      updated.description,
-                      updated.thumbnailUrl || '',
-                      updated.status,
-                      updated.createdAt
-                    ]]
-                  }
+                  requestBody: { values: rowValues }
                 }),
                 this.API_TIMEOUT,
                 'updateCourseRowInGoogle'
@@ -1362,6 +1705,7 @@ export class GoogleSheetsService {
 
     // Remove from in-memory cache immediately
     this.coursesCache.splice(idx, 1);
+    this.rebuildCoursesIndex();
 
     // Asynchronous non-blocking Google Sheet update if connected
     if (this.isConnected && this.sheetsClient && config.googleSheetId) {
@@ -1370,6 +1714,21 @@ export class GoogleSheetsService {
 
       (async () => {
         try {
+          const knownRow = this.courseRowIndexMap.get(cid);
+          if (knownRow) {
+            await withTimeout(
+              sheets.spreadsheets.values.clear({
+                spreadsheetId: sheetId,
+                range: `Courses!A${knownRow}:M${knownRow}`
+              }),
+              this.API_TIMEOUT,
+              'directClearCourseRowInGoogle'
+            );
+            this.courseRowIndexMap.delete(cid);
+            console.log(`✅ [DB] Cleared deleted course row ${knownRow} in Google Sheet`);
+            return;
+          }
+
           const response = await withTimeout(
             sheets.spreadsheets.values.get({
               spreadsheetId: sheetId,

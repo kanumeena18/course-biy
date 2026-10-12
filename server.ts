@@ -4,13 +4,26 @@ import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { config } from './src/config/config.js';
 import { googleSheetsService } from './src/services/googleSheets.js';
-import { startTelegramBot, stopTelegramBot, getBotStatus } from './src/bot/bot.js';
+import { startTelegramBot, stopTelegramBot, getBotStatus, syncTelegramAdminDecision } from './src/bot/bot.js';
 import { systemLogger } from './src/services/logger.js';
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+const hasQrAssetCached = fs.existsSync(config.qrImagePath);
 
 app.use(express.json());
+
+// Lightweight Performance Monitoring Middleware
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    if (duration > 500) {
+      console.log(`⏱️ [Slow Route Warning] ${req.method} ${req.originalUrl} took ${duration}ms`);
+    }
+  });
+  next();
+});
 
 // API Routes
 app.get('/api/logs', (req, res) => {
@@ -47,7 +60,7 @@ app.get('/api/status', (req, res) => {
       payeeName: config.payeeName,
       supportUsername: config.supportUsername,
       paymentExpiryHours: config.paymentExpiryHours,
-      hasQrAsset: fs.existsSync(config.qrImagePath)
+      hasQrAsset: hasQrAssetCached
     }
   });
 });
@@ -223,32 +236,130 @@ app.post('/api/simulate-purchase', async (req, res) => {
   }
 });
 
+app.get('/api/admins', async (req, res) => {
+  try {
+    const admins = await googleSheetsService.getAdmins();
+    res.json({ success: true, admins });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/admins', async (req, res) => {
+  try {
+    const { name, telegramId, username, role, status, addedBy } = req.body;
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ success: false, error: 'Admin name is required.' });
+    }
+    const tid = String(telegramId || '').trim();
+    if (!tid || !/^\d+$/.test(tid)) {
+      return res.status(400).json({ success: false, error: 'Telegram User ID must be a numeric ID (digits only).' });
+    }
+
+    const newAdmin = await googleSheetsService.addAdmin({
+      name: String(name).trim(),
+      telegramId: tid,
+      username: username ? String(username).replace('@', '').trim() : '',
+      role: role || 'Payment Admin',
+      status: status || 'Active'
+    }, addedBy || 'Owner');
+
+    systemLogger.log({
+      level: 'info',
+      category: 'api',
+      message: `Admin ${newAdmin.name} (${newAdmin.telegramId}) added by ${newAdmin.addedBy}`,
+      details: JSON.stringify(newAdmin)
+    });
+
+    res.json({ success: true, admin: newAdmin, message: 'Admin registered successfully' });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+app.put('/api/admins/:telegramId', async (req, res) => {
+  try {
+    const { telegramId } = req.params;
+    const { name, username, role, status, requestingAdminId } = req.body;
+    const updated = await googleSheetsService.updateAdmin(
+      telegramId,
+      { name, username, role, status },
+      requestingAdminId
+    );
+
+    systemLogger.log({
+      level: 'info',
+      category: 'api',
+      message: `Admin ${telegramId} updated`,
+      details: JSON.stringify(updated)
+    });
+
+    res.json({ success: true, admin: updated, message: 'Admin details updated successfully' });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/admins/:telegramId', async (req, res) => {
+  try {
+    const { telegramId } = req.params;
+    const { requestingAdminId } = req.query;
+    await googleSheetsService.deleteAdmin(telegramId, requestingAdminId as string | undefined);
+
+    systemLogger.log({
+      level: 'info',
+      category: 'api',
+      message: `Admin ${telegramId} removed`,
+      details: `Deleted by ${requestingAdminId || 'Dashboard'}`
+    });
+
+    res.json({ success: true, message: 'Admin deleted successfully' });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
 app.post('/api/admin-action', async (req, res) => {
   try {
-    const { userId, courseId, action, adminId } = req.body;
+    const { userId, courseId, action, adminId, adminName, paymentId, rejectionReason } = req.body;
     if (!userId || !courseId || !action) {
       return res.status(400).json({ success: false, error: 'Missing parameters' });
     }
 
-    const newStatus = action === 'APPROVE' ? 'PAID' : 'REJECTED';
-    const updated = await googleSheetsService.updatePurchaseStatus(
-      String(userId),
-      String(courseId),
-      newStatus,
-      String(adminId || config.adminTelegramId || '123456789')
-    );
+    const resolvedAdminId = String(adminId || config.adminTelegramId || '8293894004');
+    const result = await googleSheetsService.processPaymentDecision({
+      userId: String(userId),
+      courseId: String(courseId),
+      paymentId: paymentId ? String(paymentId) : undefined,
+      action: action === 'APPROVE' ? 'APPROVE' : 'REJECT',
+      adminId: resolvedAdminId,
+      adminName: adminName || undefined,
+      rejectionReason: rejectionReason || undefined
+    });
 
-    let deliveryPayload = null;
-    if (newStatus === 'PAID') {
-      const course = await googleSheetsService.getCourseById(courseId);
-      deliveryPayload = {
-        driveLink: course?.driveLink,
-        zipPassword: course?.zipPassword,
-        courseName: course?.courseName
-      };
+    if (result.alreadyProcessed) {
+      return res.status(409).json({
+        success: false,
+        alreadyProcessed: true,
+        error: result.error,
+        purchase: result.purchase
+      });
     }
 
-    res.json({ success: true, purchase: updated, delivery: deliveryPayload });
+    if (!result.success) {
+      return res.status(400).json({ success: false, error: result.error || 'Failed to process payment' });
+    }
+
+    // Non-blocking sync to active Telegram bot sessions and customer
+    if (result.purchase) {
+      syncTelegramAdminDecision(
+        result.purchase,
+        action === 'APPROVE' ? 'Approved' : 'Rejected',
+        adminName || `Admin (${resolvedAdminId})`
+      ).catch(() => {});
+    }
+
+    res.json({ success: true, purchase: result.purchase, delivery: result.delivery });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }

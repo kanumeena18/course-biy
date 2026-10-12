@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Send, Image as ImageIcon, CheckCircle, XCircle, AlertCircle, RefreshCw, QrCode, Lock, Download, ExternalLink, ShieldCheck, UserCheck, Smartphone, BellRing } from 'lucide-react';
-import { Course, Purchase } from '../types/index.js';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Send, Image as ImageIcon, CheckCircle, XCircle, AlertCircle, RefreshCw, QrCode, Lock, Download, ExternalLink, ShieldCheck, UserCheck, Smartphone, BellRing, Shield, User } from 'lucide-react';
+import { Course, Purchase, AdminUser } from '../types/index.js';
 
 interface Message {
   id: string;
@@ -15,6 +15,7 @@ interface Message {
 interface TelegramSimulatorProps {
   courses: Course[];
   purchases: Purchase[];
+  admins?: AdminUser[];
   onRefreshData: () => void;
   configData: {
     upiId: string;
@@ -28,6 +29,7 @@ interface TelegramSimulatorProps {
 export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
   courses,
   purchases,
+  admins = [],
   onRefreshData,
   configData
 }) => {
@@ -35,6 +37,54 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
   const [inputText, setInputText] = useState('');
   const [simStep, setSimStep] = useState<'idle' | 'searching' | 'awaiting_screenshot'>('idle');
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
+  const [actingAdminId, setActingAdminId] = useState<string>('');
+
+  // Memoized O(1) Lookup Maps and Search Index for high efficiency
+  const coursesById = useMemo(() => {
+    const map = new Map<string, Course>();
+    for (const c of courses) {
+      if (c.courseId) {
+        map.set(c.courseId.toLowerCase(), c);
+      }
+    }
+    return map;
+  }, [courses]);
+
+  const adminsById = useMemo(() => {
+    const map = new Map<string, AdminUser>();
+    for (const a of admins) {
+      if (a.telegramId) {
+        map.set(a.telegramId, a);
+      }
+    }
+    return map;
+  }, [admins]);
+
+  const activeCourses = useMemo(() => {
+    return courses.filter(c => (c.status || '').toLowerCase() === 'active');
+  }, [courses]);
+
+  // Unique active courses deduplicated by courseId
+  const uniqueActiveCourses = useMemo(() => {
+    const seen = new Set<string>();
+    const res: Course[] = [];
+    for (const c of activeCourses) {
+      const id = (c.courseId || '').trim().toLowerCase();
+      if (id && !seen.has(id)) {
+        seen.add(id);
+        res.push(c);
+      }
+    }
+    return res;
+  }, [activeCourses]);
+
+  // Pre-tokenized search index for active courses for ultra-fast matching
+  const searchIndex = useMemo(() => {
+    return activeCourses.map(c => ({
+      course: c,
+      searchContent: `${(c.courseName || '').toLowerCase()} ${(c.creatorName || '').toLowerCase()} ${(c.description || '').toLowerCase()}`
+    }));
+  }, [activeCourses]);
 
   // Customer Chat Messages
   const [customerMessages, setCustomerMessages] = useState<Message[]>([
@@ -183,7 +233,6 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
 
     if (action === 'browse') {
       addCustomerMessage({ sender: 'user', text: '📚 Browse Courses' });
-      const activeCourses = courses.filter(c => c.status.toLowerCase() === 'active');
       if (activeCourses.length === 0) {
         addCustomerMessage({
           sender: 'bot',
@@ -209,20 +258,8 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
 
     if (action === 'send_all_courses') {
       addCustomerMessage({ sender: 'user', text: '📚 Send All Course' });
-      const activeCourses = courses.filter(c => c.status.toLowerCase() === 'active');
 
-      // Deduplicate courses by courseId
-      const seenIds = new Set<string>();
-      const uniqueCourses: Course[] = [];
-      for (const c of activeCourses) {
-        const id = (c.courseId || '').trim().toLowerCase();
-        if (id && !seenIds.has(id)) {
-          seenIds.add(id);
-          uniqueCourses.push(c);
-        }
-      }
-
-      if (uniqueCourses.length === 0) {
+      if (uniqueActiveCourses.length === 0) {
         addCustomerMessage({
           sender: 'bot',
           text: `📚 No courses are available right now. Please check back later.`,
@@ -234,11 +271,11 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
       // Progress message
       addCustomerMessage({
         sender: 'bot',
-        text: `📚 <b>Sending all available courses (${uniqueCourses.length} courses)...</b>\n\n<i>Please wait a moment while the courses load.</i>`
+        text: `📚 <b>Sending all available courses (${uniqueActiveCourses.length} courses)...</b>\n\n<i>Please wait a moment while the courses load.</i>`
       });
 
       // Send every course card individually using identical layout and action buttons
-      uniqueCourses.forEach(course => {
+      uniqueActiveCourses.forEach(course => {
         addCustomerMessage({
           sender: 'bot',
           photoUrl: course.thumbnailUrl,
@@ -253,7 +290,7 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
       // Completion confirmation
       addCustomerMessage({
         sender: 'bot',
-        text: `✅ <b>All ${uniqueCourses.length} courses sent!</b>\n\nClick <b>🛒 BUY NOW</b> on any course card above to purchase.`,
+        text: `✅ <b>All ${uniqueActiveCourses.length} courses sent!</b>\n\nClick <b>🛒 BUY NOW</b> on any course card above to purchase.`,
         buttons: [
           { label: '🌐 Browse Courses', action: 'browse' },
           { label: '🔙 Back to Menu', action: 'start' }
@@ -264,7 +301,7 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
 
     if (action.startsWith('view_course_')) {
       const courseId = action.replace('view_course_', '');
-      const course = courses.find(c => c.courseId.toLowerCase() === courseId.toLowerCase());
+      const course = coursesById.get(courseId.toLowerCase());
       if (!course) return;
 
       setSelectedCourse(course);
@@ -284,7 +321,7 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
 
     if (action.startsWith('buy_')) {
       const courseId = action.replace('buy_', '');
-      const course = courses.find(c => c.courseId.toLowerCase() === courseId.toLowerCase());
+      const course = coursesById.get(courseId.toLowerCase());
       if (!course) return;
 
       setSelectedCourse(course);
@@ -304,7 +341,7 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
 
     if (action.startsWith('paid_')) {
       const courseId = action.replace('paid_', '');
-      const course = courses.find(c => c.courseId.toLowerCase() === courseId.toLowerCase());
+      const course = coursesById.get(courseId.toLowerCase());
       setSelectedCourse(course || null);
 
       addCustomerMessage({ sender: 'user', text: '✅ I HAVE PAID' });
@@ -385,8 +422,8 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
 
     if (action.startsWith('get_course_')) {
       const courseId = action.replace('get_course_', '');
-      const userPurchase = purchases.find(p => p.telegramUserId === '987654321' && p.courseId === courseId);
-      const course = courses.find(c => c.courseId === courseId);
+      const userPurchase = purchases.find(p => p.telegramUserId === '987654321' && p.courseId.toLowerCase() === courseId.toLowerCase());
+      const course = coursesById.get(courseId.toLowerCase());
 
       // SECURITY CHECK: Verify user ID matches and status is strictly PAID!
       if (!userPurchase || userPurchase.status !== 'PAID') {
@@ -415,13 +452,36 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
       const userId = parts[0];
       const courseId = parts[1];
 
+      const activeAdmin = (actingAdminId && adminsById.get(actingAdminId)) || admins[0];
+      const adminId = activeAdmin?.telegramId || '8293894004';
+      const adminName = activeAdmin?.name ? `${activeAdmin.name} (@${activeAdmin.username || 'admin'})` : '@StoreOwner';
+
       try {
         const res = await fetch('/api/admin-action', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId, courseId, action: 'APPROVE', adminId: '123456789' })
+          body: JSON.stringify({ userId, courseId, action: 'APPROVE', adminId, adminName })
         });
         const data = await res.json();
+
+        if (data.alreadyProcessed) {
+          alert(`⚠️ ${data.error || 'This payment was already processed by another admin.'}`);
+          setAdminMessages(prev =>
+            prev.map(m => {
+              if (m.buttons?.some(b => b.action.includes(action))) {
+                return {
+                  ...m,
+                  buttons: undefined,
+                  text: `${m.text}\n\n━━━━━━━━━━━━━━━━━━━━\n🔒 <b>ALREADY PROCESSED</b>: ${data.error || 'Handled by another admin.'}`
+                };
+              }
+              return m;
+            })
+          );
+          onRefreshData();
+          return;
+        }
+
         if (data.success) {
           onRefreshData();
 
@@ -432,7 +492,7 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
                 return {
                   ...m,
                   buttons: undefined,
-                  text: `${m.text}\n\n━━━━━━━━━━━━━━━━━━━━\n✅ <b>APPROVED</b> by @Admin at ${new Date().toLocaleTimeString()}`
+                  text: `${m.text}\n\n━━━━━━━━━━━━━━━━━━━━\n✅ <b>APPROVED</b> by ${adminName} at ${new Date().toLocaleTimeString()}`
                 };
               }
               return m;
@@ -440,7 +500,7 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
           );
 
           // Deliver to customer
-          const course = courses.find(c => c.courseId === courseId);
+          const course = coursesById.get(courseId.toLowerCase());
           addCustomerMessage({
             sender: 'bot',
             text: `✅ <b>PAYMENT VERIFIED</b>\n\nThank you for your payment!\n\n🎓 <b>Course:</b> ${course?.courseName}\n\n📥 <b>COURSE DOWNLOAD:</b>\nClick the button below to open Google Drive.\n\n🔐 <b>ZIP PASSWORD:</b>\n<code>${course?.zipPassword}</code>\n\n📌 <i>Download the ZIP file and use the password above to extract it. Keep this message safe for future access.</i>`,
@@ -462,13 +522,36 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
       const userId = parts[0];
       const courseId = parts[1];
 
+      const activeAdmin = (actingAdminId && adminsById.get(actingAdminId)) || admins[0];
+      const adminId = activeAdmin?.telegramId || '8293894004';
+      const adminName = activeAdmin?.name ? `${activeAdmin.name} (@${activeAdmin.username || 'admin'})` : '@StoreOwner';
+
       try {
         const res = await fetch('/api/admin-action', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId, courseId, action: 'REJECT', adminId: '123456789' })
+          body: JSON.stringify({ userId, courseId, action: 'REJECT', adminId, adminName })
         });
         const data = await res.json();
+
+        if (data.alreadyProcessed) {
+          alert(`⚠️ ${data.error || 'This payment was already processed by another admin.'}`);
+          setAdminMessages(prev =>
+            prev.map(m => {
+              if (m.buttons?.some(b => b.action.includes(action))) {
+                return {
+                  ...m,
+                  buttons: undefined,
+                  text: `${m.text}\n\n━━━━━━━━━━━━━━━━━━━━\n🔒 <b>ALREADY PROCESSED</b>: ${data.error || 'Handled by another admin.'}`
+                };
+              }
+              return m;
+            })
+          );
+          onRefreshData();
+          return;
+        }
+
         if (data.success) {
           onRefreshData();
 
@@ -479,7 +562,7 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
                 return {
                   ...m,
                   buttons: undefined,
-                  text: `${m.text}\n\n━━━━━━━━━━━━━━━━━━━━\n❌ <b>REJECTED</b> by @Admin at ${new Date().toLocaleTimeString()}`
+                  text: `${m.text}\n\n━━━━━━━━━━━━━━━━━━━━\n❌ <b>REJECTED</b> by ${adminName} at ${new Date().toLocaleTimeString()}`
                 };
               }
               return m;
@@ -487,7 +570,7 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
           );
 
           // Deliver rejection notice to customer
-          const course = courses.find(c => c.courseId === courseId);
+          const course = coursesById.get(courseId.toLowerCase());
           addCustomerMessage({
             sender: 'bot',
             text: `❌ <b>PAYMENT NOT VERIFIED</b>\n\nYour payment submission for <b>${course?.courseName}</b> could not be verified in our bank account.\n\nIf you believe there was an error or money was deducted, please contact our support team:\n💬 Support: ${configData.supportUsername}`
@@ -511,15 +594,10 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
       addCustomerMessage({ sender: 'user', text });
       setSimStep('idle');
 
-      const matches = courses.filter(c => {
-        if (c.status.toLowerCase() !== 'active') return false;
-        const q = text.toLowerCase();
-        return (
-          c.courseName.toLowerCase().includes(q) ||
-          c.creatorName.toLowerCase().includes(q) ||
-          c.description.toLowerCase().includes(q)
-        );
-      });
+      const queryTokens = text.toLowerCase().split(/\s+/).filter(Boolean);
+      const matches = queryTokens.length === 0 ? [] : searchIndex
+        .filter(item => queryTokens.every(tok => item.searchContent.includes(tok)))
+        .map(item => item.course);
 
       if (matches.length === 0) {
         addCustomerMessage({
@@ -661,44 +739,46 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
   };
 
   return (
-    <div className="space-y-4">
-      {/* View Switcher Bar */}
-      <div className="bg-white border border-slate-200/90 rounded-2xl p-4 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+    <div className="space-y-5">
+      {/* View Switcher Bar with Claymorphic Style */}
+      <div className="clay-card p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-sm font-bold text-slate-900 flex items-center space-x-2">
-            <span>Interactive Simulator</span>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+          <div className="flex items-center space-x-2.5">
+            <h2 className="text-sm font-extrabold text-slate-900 tracking-tight">
+              Interactive Bot Simulator
+            </h2>
+            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200/80 shadow-2xs">
               Live Testing Console
             </span>
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Test the entire shopping flow and toggle to the Admin channel to review payment screenshots.
+          </div>
+          <p className="text-xs text-slate-500 mt-1 font-medium">
+            Test the entire customer checkout journey and toggle to the Admin channel to review payment screenshots.
           </p>
         </div>
 
-        {/* Screen toggle */}
-        <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+        {/* Screen toggle with Sunken Track & Raised Active Tab */}
+        <div className="flex clay-inset p-1.5 rounded-2xl w-full sm:w-auto">
           <button
             onClick={() => setActiveScreen('customer')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center space-x-1.5 ${
+            className={`flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-2 ${
               activeScreen === 'customer'
-                ? 'bg-white text-slate-900 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
+                ? 'clay-pill-active'
+                : 'clay-pill-inactive'
             }`}
           >
-            <Smartphone className="w-3.5 h-3.5 text-blue-600" />
+            <Smartphone className="w-3.5 h-3.5 text-indigo-600" />
             <span>Customer Bot</span>
           </button>
           <button
             onClick={() => setActiveScreen('admin')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center space-x-1.5 relative ${
+            className={`flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-2 relative ${
               activeScreen === 'admin'
-                ? 'bg-white text-slate-900 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
+                ? 'clay-pill-active'
+                : 'clay-pill-inactive'
             }`}
           >
             <BellRing className="w-3.5 h-3.5 text-indigo-600" />
-            <span>Admin Alert Channel</span>
+            <span>Admin Channel</span>
             {adminMessages.some(m => m.buttons?.length) && (
               <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse ml-1" />
             )}
@@ -707,20 +787,33 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
       </div>
 
       {/* Simulator Layout Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Left: Smartphone Screen */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Left: Smartphone Screen with Soft Pillowy Clay Frame */}
         <div className="lg:col-span-7 xl:col-span-8 flex justify-center">
-          <div className="w-full max-w-md bg-white border border-slate-200/90 rounded-3xl shadow-md overflow-hidden flex flex-col h-[640px]">
-            {/* Telegram App Bar */}
-            <div className="bg-slate-50 border-b border-slate-200 px-4 py-3 flex items-center justify-between">
-              <div className="flex items-center space-x-2.5">
-                <div className="w-9 h-9 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-sm shadow-xs">
+          <div 
+            className="w-full max-w-md bg-white rounded-[32px] overflow-hidden flex flex-col h-[650px] border border-slate-200/80"
+            style={{
+              boxShadow: '0 25px 50px -12px rgba(35, 45, 65, 0.12), inset 0 2px 2px rgba(255, 255, 255, 1), inset 0 -2px 3px rgba(100, 116, 139, 0.05)'
+            }}
+          >
+            {/* Telegram App Bar with Clay Surface */}
+            <div className="bg-[#FFFFFF] border-b border-slate-100 px-5 py-3.5 flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div 
+                  className="w-10 h-10 rounded-2xl text-white font-bold flex items-center justify-center text-sm shadow-sm"
+                  style={{
+                    background: activeScreen === 'customer' 
+                      ? 'linear-gradient(180deg, #6054F7 0%, #4D3FE8 100%)'
+                      : 'linear-gradient(180deg, #F59E0B 0%, #D97706 100%)',
+                    boxShadow: '0 4px 10px rgba(0,0,0,0.1), inset 0 1px 1px rgba(255,255,255,0.4)'
+                  }}
+                >
                   {activeScreen === 'customer' ? '🎓' : '👑'}
                 </div>
                 <div>
-                  <div className="text-xs font-bold text-slate-900 flex items-center space-x-1">
+                  <div className="text-xs font-bold text-slate-900 flex items-center space-x-1.5">
                     <span>{activeScreen === 'customer' ? '@CourseBazarBot' : 'Admin Alert Channel'}</span>
-                    <span className="text-[10px] text-blue-600">✓</span>
+                    <span className="text-[10px] text-indigo-600 font-extrabold">✓</span>
                   </div>
                   <div className="text-[10px] text-slate-400 font-medium">
                     {activeScreen === 'customer' ? 'official course bot' : 'Confidential Admin Alerts'}
@@ -736,21 +829,44 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
                     onRefreshData();
                   }
                 }}
-                className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-200/60 rounded-lg transition"
+                className="p-2 text-slate-500 hover:text-slate-800 clay-btn-secondary"
                 title="Restart chat"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
               </button>
             </div>
 
-            {/* Chat Messages Body */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3.5 bg-slate-100/70">
+            {/* Multi-Admin Switcher in Admin Channel */}
+            {activeScreen === 'admin' && admins.length > 0 && (
+              <div className="bg-[#F8FAFD] text-slate-800 px-4 py-2 border-b border-slate-100 flex items-center justify-between text-[11px]">
+                <div className="flex items-center space-x-2">
+                  <Shield className="w-3.5 h-3.5 text-indigo-600" />
+                  <span className="text-slate-500 font-medium">Simulating Admin:</span>
+                </div>
+                <select
+                  value={actingAdminId || (admins.find(a => a.status === 'Active')?.telegramId || admins[0]?.telegramId)}
+                  onChange={(e) => setActingAdminId(e.target.value)}
+                  className="clay-input text-slate-800 text-[11px] font-semibold px-2.5 py-1"
+                >
+                  {admins.map(a => (
+                    <option key={a.telegramId} value={a.telegramId}>
+                      {a.name} ({a.role}) · {a.status}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Chat Messages Body with Soft Porcelain Background */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-3.5 bg-[#F4F6F9]">
               {(activeScreen === 'customer' ? customerMessages : adminMessages).length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-400 space-y-2">
-                  <ShieldCheck className="w-10 h-10 text-slate-300" />
-                  <p className="text-xs font-semibold text-slate-600">No payment alerts in queue</p>
-                  <p className="text-[11px] text-slate-400 max-w-xs">
-                    When customers upload a screenshot, it will appear here instantly with Approve / Reject buttons.
+                <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-400 space-y-2.5">
+                  <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center shadow-xs text-slate-300">
+                    <ShieldCheck className="w-6 h-6" />
+                  </div>
+                  <p className="text-xs font-bold text-slate-700">No payment alerts in queue</p>
+                  <p className="text-[11px] text-slate-400 max-w-xs leading-relaxed">
+                    When customers upload a screenshot, it will appear here instantly with tactile Approve / Reject buttons.
                   </p>
                 </div>
               ) : (
@@ -760,39 +876,53 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
                     className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}
                   >
                     <div
-                      className={`max-w-[85%] rounded-2xl p-3 text-xs leading-relaxed shadow-xs ${
+                      className={`max-w-[85%] rounded-2xl p-3.5 text-xs leading-relaxed ${
                         msg.sender === 'user'
-                          ? 'bg-blue-600 text-white rounded-br-xs'
+                          ? 'text-white rounded-br-xs'
                           : msg.isAlert
-                          ? 'bg-amber-50/90 text-slate-800 border border-amber-200 rounded-bl-xs'
-                          : 'bg-white text-slate-800 border border-slate-200/80 rounded-bl-xs'
+                          ? 'bg-amber-50/95 text-slate-900 border border-amber-200/90 rounded-bl-xs shadow-sm'
+                          : 'bg-white text-slate-900 border border-slate-200/70 rounded-bl-xs'
                       }`}
+                      style={
+                        msg.sender === 'user'
+                          ? {
+                              background: 'linear-gradient(180deg, #6054F7 0%, #4D3FE8 100%)',
+                              boxShadow: '0 6px 16px -2px rgba(77, 63, 232, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.35)'
+                            }
+                          : {
+                              boxShadow: '0 4px 14px -2px rgba(35, 45, 65, 0.05), inset 0 1px 1.5px rgba(255, 255, 255, 1)'
+                            }
+                      }
                     >
-                      {/* Photo Attachment */}
+                      {/* Photo Attachment with Styled Fallback */}
                       {msg.photoUrl && (
-                        <div className="mb-2 rounded-xl overflow-hidden border border-slate-200">
+                        <div className="mb-2.5 rounded-xl overflow-hidden border border-slate-200/70 bg-slate-100 shadow-2xs">
                           <img
                             src={msg.photoUrl}
                             alt="Preview attachment"
-                            className="w-full max-h-44 object-cover"
+                            referrerPolicy="no-referrer"
+                            className="w-full max-h-48 object-cover"
+                            onError={(e) => {
+                              (e.target as HTMLElement).style.display = 'none';
+                            }}
                           />
                         </div>
                       )}
 
                       {/* Text content */}
                       <div
-                        className="whitespace-pre-wrap"
+                        className="whitespace-pre-wrap font-sans"
                         dangerouslySetInnerHTML={{ __html: msg.text }}
                       />
 
-                      <div className="mt-1 text-[9px] text-right opacity-60">
+                      <div className="mt-1.5 text-[9px] text-right opacity-60 font-medium">
                         {msg.timestamp}
                       </div>
                     </div>
 
-                    {/* Inline Telegram Buttons */}
+                    {/* Inline Telegram Buttons with Tactile Clay Style */}
                     {msg.buttons && msg.buttons.length > 0 && (
-                      <div className={`mt-1.5 w-full max-w-[85%] ${msg.buttons.length === 6 ? 'grid grid-cols-2 gap-1.5' : 'space-y-1'}`}>
+                      <div className={`mt-2 w-full max-w-[85%] ${msg.buttons.length === 6 ? 'grid grid-cols-2 gap-2' : 'space-y-1.5'}`}>
                         {msg.buttons.map((btn, bIdx) =>
                           btn.url ? (
                             <a
@@ -800,7 +930,7 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
                               href={btn.url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="w-full py-2 px-3 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 rounded-xl text-xs font-bold text-center flex items-center justify-center space-x-1.5 transition shadow-xs"
+                              className="w-full py-2.5 px-3 clay-btn-success text-xs font-bold text-center flex items-center justify-center space-x-1.5"
                             >
                               <span className="truncate">{btn.label}</span>
                               <ExternalLink className="w-3.5 h-3.5 shrink-0" />
@@ -809,14 +939,14 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
                             <button
                               key={bIdx}
                               onClick={() => handleButtonClick(btn.action)}
-                              className={`w-full py-2 px-2.5 rounded-xl text-xs font-semibold text-center transition flex items-center justify-center space-x-1 shadow-xs ${
+                              className={`w-full py-2.5 px-3 rounded-xl text-xs font-bold text-center transition flex items-center justify-center space-x-1.5 ${
                                 btn.action.startsWith('admin_approve')
-                                  ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                                  ? 'clay-btn-success'
                                   : btn.action.startsWith('admin_reject')
-                                  ? 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'
+                                  ? 'clay-btn-danger'
                                   : btn.action.startsWith('buy_')
-                                  ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                                  : 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200'
+                                  ? 'clay-btn-primary'
+                                  : 'clay-btn-secondary'
                               }`}
                             >
                               <span className="truncate">{btn.label}</span>
@@ -833,18 +963,18 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
 
             {/* Bottom Actions for Customer Mode */}
             {activeScreen === 'customer' && (
-              <div className="p-3 bg-white border-t border-slate-200 space-y-2">
+              <div className="p-3.5 bg-white border-t border-slate-100 space-y-2.5">
                 {simStep === 'awaiting_screenshot' && (
-                  <div className="p-2.5 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-between">
-                    <div className="flex items-center space-x-1.5">
-                      <ImageIcon className="w-3.5 h-3.5 text-blue-600" />
-                      <span className="text-xs text-blue-900 font-semibold">Payment screenshot required</span>
+                  <div className="p-3 rounded-2xl bg-indigo-50/80 border border-indigo-100 flex items-center justify-between shadow-2xs">
+                    <div className="flex items-center space-x-2">
+                      <ImageIcon className="w-3.5 h-3.5 text-indigo-600" />
+                      <span className="text-xs text-indigo-900 font-bold">Screenshot required</span>
                     </div>
                     <button
                       onClick={handleSimulateScreenshotUpload}
-                      className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition flex items-center space-x-1 shadow-xs"
+                      className="px-3.5 py-1.5 clay-btn-primary text-xs font-bold"
                     >
-                      <ImageIcon className="w-3 h-3" />
+                      <ImageIcon className="w-3 h-3 mr-1" />
                       <span>Upload Proof</span>
                     </button>
                   </div>
@@ -862,13 +992,14 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
                         ? 'Click "Upload Proof" button above...'
                         : 'Type message or command (/start)...'
                     }
-                    className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:bg-white"
+                    className="flex-1 clay-input px-3.5 py-2.5 text-xs text-slate-800 placeholder-slate-400 font-medium"
                   />
                   <button
                     type="submit"
-                    className="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition shadow-xs"
+                    className="p-2.5 clay-btn-primary"
+                    aria-label="Send message"
                   >
-                    <Send className="w-3.5 h-3.5" />
+                    <Send className="w-4 h-4" />
                   </button>
                 </form>
               </div>
@@ -877,29 +1008,29 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
         </div>
 
         {/* Right: Quick Action Controls & Security Rules Card */}
-        <div className="lg:col-span-5 xl:col-span-4 space-y-4">
+        <div className="lg:col-span-5 xl:col-span-4 space-y-5">
           {/* Quick Scenario Runner */}
-          <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-xs space-y-3">
-            <h3 className="font-bold text-slate-900 text-xs uppercase tracking-wider flex items-center space-x-1.5">
-              <span>⚡</span>
+          <div className="clay-card p-5 sm:p-6 space-y-3.5">
+            <h3 className="font-extrabold text-slate-900 text-xs uppercase tracking-wider flex items-center space-x-2">
+              <span className="text-indigo-600">⚡</span>
               <span>1-Click Test Scenarios</span>
             </h3>
 
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <button
                 onClick={() => handleButtonClick('start')}
-                className="w-full text-left px-3 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 text-xs font-semibold text-slate-700 transition flex items-center justify-between border border-slate-200/60"
+                className="w-full text-left px-3.5 py-2.5 rounded-2xl bg-slate-50 hover:bg-slate-100/90 text-xs font-bold text-slate-700 transition flex items-center justify-between border border-slate-200/60 shadow-2xs"
               >
                 <span>1. Open Bot (/start)</span>
-                <span className="text-slate-400 text-[10px] font-normal">Welcome Menu</span>
+                <span className="text-slate-400 text-[10px] font-medium">Welcome Menu</span>
               </button>
 
               <button
                 onClick={() => handleButtonClick('browse')}
-                className="w-full text-left px-3 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 text-xs font-semibold text-slate-700 transition flex items-center justify-between border border-slate-200/60"
+                className="w-full text-left px-3.5 py-2.5 rounded-2xl bg-slate-50 hover:bg-slate-100/90 text-xs font-bold text-slate-700 transition flex items-center justify-between border border-slate-200/60 shadow-2xs"
               >
                 <span>2. Browse All Courses</span>
-                <span className="text-slate-400 text-[10px] font-normal">{courses.length} courses</span>
+                <span className="text-slate-400 text-[10px] font-medium">{courses.length} courses</span>
               </button>
 
               <button
@@ -908,10 +1039,10 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
                   const c = courses[0];
                   if (c) handleButtonClick(`view_course_${c.courseId}`);
                 }}
-                className="w-full text-left px-3 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-semibold text-slate-700 transition flex items-center justify-between border border-slate-200/60"
+                className="w-full text-left px-3.5 py-2.5 rounded-2xl bg-slate-50 hover:bg-slate-100/90 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-bold text-slate-700 transition flex items-center justify-between border border-slate-200/60 shadow-2xs"
               >
                 <span>3. View Course Details</span>
-                <span className="text-slate-400 text-[10px] font-normal">{courses.length > 0 ? 'Private ZIP safe' : 'Add course first'}</span>
+                <span className="text-slate-400 text-[10px] font-medium">{courses.length > 0 ? 'Private ZIP safe' : 'Add course first'}</span>
               </button>
 
               <button
@@ -920,49 +1051,49 @@ export const TelegramSimulator: React.FC<TelegramSimulatorProps> = ({
                   const c = courses[0];
                   if (c) handleButtonClick(`buy_${c.courseId}`);
                 }}
-                className="w-full text-left px-3 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-semibold text-slate-700 transition flex items-center justify-between border border-slate-200/60"
+                className="w-full text-left px-3.5 py-2.5 rounded-2xl bg-slate-50 hover:bg-slate-100/90 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-bold text-slate-700 transition flex items-center justify-between border border-slate-200/60 shadow-2xs"
               >
                 <span>4. View UPI QR Code</span>
-                <span className="text-slate-400 text-[10px] font-normal">{courses.length > 0 ? 'No Order ID / UTR' : 'Add course first'}</span>
+                <span className="text-slate-400 text-[10px] font-medium">{courses.length > 0 ? 'No Order ID / UTR' : 'Add course first'}</span>
               </button>
 
               <button
                 onClick={handleSimulateScreenshotUpload}
-                className="w-full text-left px-3 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-xs font-semibold text-blue-800 transition flex items-center justify-between border border-blue-200"
+                className="w-full text-left px-3.5 py-2.5 rounded-2xl bg-indigo-50/70 hover:bg-indigo-100/80 text-xs font-bold text-indigo-900 transition flex items-center justify-between border border-indigo-200/80 shadow-2xs"
               >
                 <span>5. Upload Payment Screenshot</span>
-                <span className="text-blue-600 text-[10px] font-normal">Submits to Admin</span>
+                <span className="text-indigo-600 text-[10px] font-bold">Submits to Admin</span>
               </button>
 
               <button
                 onClick={() => setActiveScreen('admin')}
-                className="w-full text-left px-3 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-xs font-semibold text-indigo-800 transition flex items-center justify-between border border-indigo-200"
+                className="w-full text-left px-3.5 py-2.5 rounded-2xl bg-purple-50/70 hover:bg-purple-100/80 text-xs font-bold text-purple-900 transition flex items-center justify-between border border-purple-200/80 shadow-2xs"
               >
-                <span>6. Check Admin Alert Channel</span>
-                <span className="text-indigo-600 text-[10px] font-normal">Approve / Reject</span>
+                <span>6. Check Admin Channel</span>
+                <span className="text-purple-600 text-[10px] font-bold">Approve / Reject</span>
               </button>
             </div>
           </div>
 
-          {/* Security Card */}
-          <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-xs space-y-2.5">
-            <h4 className="font-bold text-xs uppercase tracking-wider text-slate-800 flex items-center space-x-1.5">
+          {/* Security Rules Card */}
+          <div className="clay-card p-5 sm:p-6 space-y-3">
+            <h4 className="font-extrabold text-xs uppercase tracking-wider text-slate-900 flex items-center space-x-2">
               <ShieldCheck className="w-4 h-4 text-emerald-600" />
               <span>Manual Verification Rules</span>
             </h4>
 
-            <ul className="text-xs text-slate-500 space-y-2 leading-relaxed">
-              <li className="flex items-start space-x-1.5">
+            <ul className="text-xs text-slate-500 space-y-2.5 leading-relaxed font-medium">
+              <li className="flex items-start space-x-2">
                 <span className="text-emerald-600 font-bold">•</span>
-                <span><strong>No Order ID / UTR:</strong> Verified strictly by Telegram User ID and Course Name.</span>
+                <span><strong className="text-slate-800">No Order ID / UTR:</strong> Verified strictly by Telegram User ID and Course Name.</span>
               </li>
-              <li className="flex items-start space-x-1.5">
+              <li className="flex items-start space-x-2">
                 <span className="text-emerald-600 font-bold">•</span>
-                <span><strong>Bank Check:</strong> Admin confirms money in UPI app before clicking Approve.</span>
+                <span><strong className="text-slate-800">Bank Check:</strong> Admin confirms money in UPI app before clicking Approve.</span>
               </li>
-              <li className="flex items-start space-x-1.5">
+              <li className="flex items-start space-x-2">
                 <span className="text-emerald-600 font-bold">•</span>
-                <span><strong>Drive Link & ZIP Password:</strong> Released ONLY when status is updated to <code>PAID</code>.</span>
+                <span><strong className="text-slate-800">Drive Link & ZIP Password:</strong> Released ONLY when status is updated to <code className="text-indigo-600 font-semibold">PAID</code>.</span>
               </li>
             </ul>
           </div>

@@ -82,11 +82,13 @@ export const keyboards = {
     ]);
   },
 
-  adminApproval: (userId: string, courseId: string) => {
+  adminApproval: (userId: string, courseId: string, paymentId?: string) => {
+    const approveCb = paymentId ? `admin_approve_${userId}_${courseId}_${paymentId}` : `admin_approve_${userId}_${courseId}`;
+    const rejectCb = paymentId ? `admin_reject_${userId}_${courseId}_${paymentId}` : `admin_reject_${userId}_${courseId}`;
     return Markup.inlineKeyboard([
       [
-        Markup.button.callback('✅ APPROVE PAYMENT', `admin_approve_${userId}_${courseId}`),
-        Markup.button.callback('❌ REJECT PAYMENT', `admin_reject_${userId}_${courseId}`)
+        Markup.button.callback('✅ APPROVE PAYMENT', approveCb),
+        Markup.button.callback('❌ REJECT PAYMENT', rejectCb)
       ]
     ]);
   },

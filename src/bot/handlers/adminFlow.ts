@@ -3,75 +3,100 @@ import { googleSheetsService } from '../../services/googleSheets.js';
 import { messages } from '../messages/templates.js';
 import { keyboards } from '../keyboards/inline.js';
 
-export async function handleAdminApprove(ctx: Context, userId: string, courseId: string) {
+export async function handleAdminApprove(ctx: Context, userId: string, courseId: string, paymentId?: string) {
   if (!ctx.from) return;
   const adminId = String(ctx.from.id);
-
-  // 1. Authorization check
-  const isAuthorized = await googleSheetsService.isAdmin(adminId);
-  if (!isAuthorized) {
-    ctx.answerCbQuery('⛔ You are not authorized to perform admin actions.', { show_alert: true }).catch(() => {});
-    return;
-  }
+  const adminTag = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || `Admin (${adminId})`);
 
   try {
-    // 2. Fetch purchase
-    const purchase = await googleSheetsService.getPurchaseByUserAndCourse(userId, courseId);
-    if (!purchase) {
-      ctx.answerCbQuery('❌ Purchase record not found.', { show_alert: true }).catch(() => {});
+    // 1. First-Valid-Action-Wins Atomic Decision
+    const result = await googleSheetsService.processPaymentDecision({
+      userId,
+      courseId,
+      paymentId,
+      action: 'APPROVE',
+      adminId,
+      adminName: adminTag
+    });
+
+    if (result.alreadyProcessed) {
+      ctx.answerCbQuery(
+        result.error || '⚠️ This payment has already been processed by another admin.',
+        { show_alert: true }
+      ).catch(() => {});
+
+      // Remove buttons and show processed state on this admin's message immediately
+      try {
+        const processedNote = `\n\n━━━━━━━━━━━━━━━━━━━━\n🔒 <b>ALREADY PROCESSED</b>: This payment was already handled.`;
+        if ('caption' in (ctx.callbackQuery?.message || {})) {
+          await ctx.editMessageCaption((ctx.callbackQuery?.message as any).caption + processedNote, { parse_mode: 'HTML' });
+        } else if ('text' in (ctx.callbackQuery?.message || {})) {
+          await ctx.editMessageText((ctx.callbackQuery?.message as any).text + processedNote, { parse_mode: 'HTML' });
+        }
+      } catch (e) {}
       return;
     }
 
-    // 3. Prevent duplicate approval
-    if (purchase.status === 'PAID') {
-      ctx.answerCbQuery('⚠️ This purchase has ALREADY been approved!', { show_alert: true }).catch(() => {});
+    if (!result.success) {
+      ctx.answerCbQuery(result.error || '❌ Error processing payment approval.', { show_alert: true }).catch(() => {});
       return;
     }
 
-    // 4. Update status in database (Instant write-through)
-    await googleSheetsService.updatePurchaseStatus(userId, courseId, 'PAID', adminId);
-
-    // 5. Fetch course details to get Drive link and ZIP password
-    const course = await googleSheetsService.getCourseById(courseId);
-    if (!course) {
-      ctx.answerCbQuery('⚠️ Course details missing in database.', { show_alert: true }).catch(() => {});
-      return;
-    }
-
-    // Answer callback query safely
+    // Answer winning admin's callback query
     ctx.answerCbQuery('✅ Payment Approved! Access sent to customer.').catch(() => {});
 
-    // 6. Update Admin Message UI in background
-    const adminTag = ctx.from.username ? `@${ctx.from.username}` : `Admin (ID: ${adminId})`;
+    // 2. Update winning admin's message (Remove buttons!)
+    const decisionTime = new Date().toLocaleTimeString();
     try {
+      const winningNote = `\n\n━━━━━━━━━━━━━━━━━━━━\n✅ <b>APPROVED</b> by ${adminTag} at ${decisionTime}`;
       if ('caption' in (ctx.callbackQuery?.message || {})) {
-        await ctx.editMessageCaption(
-          `${(ctx.callbackQuery?.message as any).caption}\n\n━━━━━━━━━━━━━━━━━━━━\n✅ <b>APPROVED</b> by ${adminTag} at ${new Date().toLocaleTimeString()}`,
-          { parse_mode: 'HTML' }
-        );
+        await ctx.editMessageCaption((ctx.callbackQuery?.message as any).caption + winningNote, { parse_mode: 'HTML' });
       } else if ('text' in (ctx.callbackQuery?.message || {})) {
-        await ctx.editMessageText(
-          `${(ctx.callbackQuery?.message as any).text}\n\n━━━━━━━━━━━━━━━━━━━━\n✅ <b>APPROVED</b> by ${adminTag} at ${new Date().toLocaleTimeString()}`,
-          { parse_mode: 'HTML' }
-        );
+        await ctx.editMessageText((ctx.callbackQuery?.message as any).text + winningNote, { parse_mode: 'HTML' });
       }
-    } catch (e) {
-      // Ignored if message was unchanged
+    } catch (e) {}
+
+    // 3. Deliver course access to customer IMMEDIATELY without waiting for admin loops!
+    const course = await googleSheetsService.getCourseById(courseId);
+    if (course) {
+      try {
+        await ctx.telegram.sendMessage(
+          userId,
+          messages.paymentApprovedCustomerDelivery(course),
+          {
+            parse_mode: 'HTML',
+            ...keyboards.courseDelivery(course.driveLink)
+          }
+        );
+        console.log(`✅ [Delivery] Sent course ${course.courseName} to customer ${userId}`);
+      } catch (sendErr: any) {
+        console.warn(`⚠️ [Delivery] Could not deliver directly to customer ${userId}: ${sendErr.message}`);
+      }
     }
 
-    // 7. Deliver course to customer
-    try {
-      await ctx.telegram.sendMessage(
-        userId,
-        messages.paymentApprovedCustomerDelivery(course),
-        {
-          parse_mode: 'HTML',
-          ...keyboards.courseDelivery(course.driveLink)
-        }
-      );
-      console.log(`✅ [Delivery] Sent course ${course.courseName} to customer ${userId}`);
-    } catch (sendErr: any) {
-      console.warn(`⚠️ [Delivery] Could not deliver directly to customer ${userId}: ${sendErr.message}`);
+    // 4. Update all other admins' pending notifications CONCURRENTLY in background
+    const notifs = result.purchase?.adminNotificationMessageIds || [];
+    const otherNotifs = notifs.filter(n => String(n.chatId) !== adminId);
+    if (otherNotifs.length > 0) {
+      const notifText =
+        `🔒 <b>PAYMENT PROCESSED</b>\n\n` +
+        `🎓 <b>Course:</b> ${result.purchase?.courseName}\n` +
+        `👤 <b>Customer ID:</b> <code>${result.purchase?.telegramUserId}</code>\n` +
+        `💰 <b>Amount:</b> ₹${result.purchase?.amount}\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `✅ <b>APPROVED</b> by ${adminTag} at ${decisionTime}`;
+
+      Promise.allSettled(
+        otherNotifs.map(async (notif) => {
+          try {
+            await ctx.telegram.editMessageCaption(notif.chatId, notif.messageId, undefined, notifText, { parse_mode: 'HTML' });
+          } catch {
+            try {
+              await ctx.telegram.editMessageText(notif.chatId, notif.messageId, undefined, notifText, { parse_mode: 'HTML' });
+            } catch {}
+          }
+        })
+      ).catch(() => {});
     }
   } catch (error: any) {
     console.error('❌ [Admin Approve Error]:', error.message || error);
@@ -79,51 +104,61 @@ export async function handleAdminApprove(ctx: Context, userId: string, courseId:
   }
 }
 
-export async function handleAdminReject(ctx: Context, userId: string, courseId: string) {
+export async function handleAdminReject(ctx: Context, userId: string, courseId: string, paymentId?: string, reason?: string) {
   if (!ctx.from) return;
   const adminId = String(ctx.from.id);
-
-  const isAuthorized = await googleSheetsService.isAdmin(adminId);
-  if (!isAuthorized) {
-    ctx.answerCbQuery('⛔ You are not authorized to perform admin actions.', { show_alert: true }).catch(() => {});
-    return;
-  }
+  const adminTag = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || `Admin (${adminId})`);
 
   try {
-    const purchase = await googleSheetsService.getPurchaseByUserAndCourse(userId, courseId);
-    if (!purchase) {
-      ctx.answerCbQuery('❌ Purchase record not found.', { show_alert: true }).catch(() => {});
+    const result = await googleSheetsService.processPaymentDecision({
+      userId,
+      courseId,
+      paymentId,
+      action: 'REJECT',
+      adminId,
+      adminName: adminTag,
+      rejectionReason: reason || 'Payment screenshot could not be verified'
+    });
+
+    if (result.alreadyProcessed) {
+      ctx.answerCbQuery(
+        result.error || '⚠️ This payment has already been processed by another admin.',
+        { show_alert: true }
+      ).catch(() => {});
+
+      try {
+        const processedNote = `\n\n━━━━━━━━━━━━━━━━━━━━\n🔒 <b>ALREADY PROCESSED</b>: This payment was already handled.`;
+        if ('caption' in (ctx.callbackQuery?.message || {})) {
+          await ctx.editMessageCaption((ctx.callbackQuery?.message as any).caption + processedNote, { parse_mode: 'HTML' });
+        } else if ('text' in (ctx.callbackQuery?.message || {})) {
+          await ctx.editMessageText((ctx.callbackQuery?.message as any).text + processedNote, { parse_mode: 'HTML' });
+        }
+      } catch (e) {}
       return;
     }
 
-    // Update status in Google Sheets
-    await googleSheetsService.updatePurchaseStatus(userId, courseId, 'REJECTED', adminId);
-
-    const course = await googleSheetsService.getCourseById(courseId);
-    const courseName = course ? course.courseName : 'Course';
+    if (!result.success) {
+      ctx.answerCbQuery(result.error || '❌ Error processing rejection.', { show_alert: true }).catch(() => {});
+      return;
+    }
 
     ctx.answerCbQuery('❌ Payment Rejected. Customer notified.').catch(() => {});
 
-    // Update Admin Message UI
-    const adminTag = ctx.from.username ? `@${ctx.from.username}` : `Admin (ID: ${adminId})`;
+    // Update winning admin's message
+    const decisionTime = new Date().toLocaleTimeString();
     try {
+      const winningNote = `\n\n━━━━━━━━━━━━━━━━━━━━\n❌ <b>REJECTED</b> by ${adminTag} at ${decisionTime}`;
       if ('caption' in (ctx.callbackQuery?.message || {})) {
-        await ctx.editMessageCaption(
-          `${(ctx.callbackQuery?.message as any).caption}\n\n━━━━━━━━━━━━━━━━━━━━\n❌ <b>REJECTED</b> by ${adminTag} at ${new Date().toLocaleTimeString()}`,
-          { parse_mode: 'HTML' }
-        );
+        await ctx.editMessageCaption((ctx.callbackQuery?.message as any).caption + winningNote, { parse_mode: 'HTML' });
       } else if ('text' in (ctx.callbackQuery?.message || {})) {
-        await ctx.editMessageText(
-          `${(ctx.callbackQuery?.message as any).text}\n\n━━━━━━━━━━━━━━━━━━━━\n❌ <b>REJECTED</b> by ${adminTag} at ${new Date().toLocaleTimeString()}`,
-          { parse_mode: 'HTML' }
-        );
+        await ctx.editMessageText((ctx.callbackQuery?.message as any).text + winningNote, { parse_mode: 'HTML' });
       }
-    } catch (e) {
-      // Ignored if unchanged
-    }
+    } catch (e) {}
 
-    // Notify customer politely
+    // Notify customer politely right away
     try {
+      const course = await googleSheetsService.getCourseById(courseId);
+      const courseName = course ? course.courseName : (result.purchase?.courseName || 'Course');
       const supportUsername = await googleSheetsService.getSetting('SUPPORT_USERNAME', '@kanumeena18');
       await ctx.telegram.sendMessage(
         userId,
@@ -132,6 +167,31 @@ export async function handleAdminReject(ctx: Context, userId: string, courseId: 
       );
     } catch (notifyErr: any) {
       console.warn(`⚠️ [Rejection Notify] Customer notification notice: ${notifyErr.message}`);
+    }
+
+    // Update all other admins' pending notifications CONCURRENTLY in background
+    const notifs = result.purchase?.adminNotificationMessageIds || [];
+    const otherNotifs = notifs.filter(n => String(n.chatId) !== adminId);
+    if (otherNotifs.length > 0) {
+      const notifText =
+        `🔒 <b>PAYMENT PROCESSED</b>\n\n` +
+        `🎓 <b>Course:</b> ${result.purchase?.courseName}\n` +
+        `👤 <b>Customer ID:</b> <code>${result.purchase?.telegramUserId}</code>\n` +
+        `💰 <b>Amount:</b> ₹${result.purchase?.amount}\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `❌ <b>REJECTED</b> by ${adminTag} at ${decisionTime}`;
+
+      Promise.allSettled(
+        otherNotifs.map(async (notif) => {
+          try {
+            await ctx.telegram.editMessageCaption(notif.chatId, notif.messageId, undefined, notifText, { parse_mode: 'HTML' });
+          } catch {
+            try {
+              await ctx.telegram.editMessageText(notif.chatId, notif.messageId, undefined, notifText, { parse_mode: 'HTML' });
+            } catch {}
+          }
+        })
+      ).catch(() => {});
     }
   } catch (error: any) {
     console.error('❌ [Admin Reject Error]:', error.message || error);

@@ -144,8 +144,9 @@ export async function handleUserText(ctx: Context) {
 }
 
 let cachedQrFileId: string | null = null;
+const thumbnailFileIdCache = new Map<string, string>();
 
-function withFastTimeout<T>(promise: Promise<T>, ms = 2200): Promise<T> {
+function withFastTimeout<T>(promise: Promise<T>, ms = 1500): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('Photo timeout')), ms);
     promise.then(
@@ -168,16 +169,44 @@ export async function sendCourseCard(ctx: Context, course: Course, prefixText = 
   // Check if Image Thumbnail Path or URL is provided
   const thumb = course.thumbnailUrl?.trim();
   if (thumb) {
+    // Check in-memory Telegram file_id cache for instant edge response (< 50ms)
+    const cachedFileId = thumbnailFileIdCache.get(thumb) || thumbnailFileIdCache.get(course.courseId);
+    if (cachedFileId) {
+      try {
+        await withFastTimeout(
+          ctx.replyWithPhoto(cachedFileId, {
+            caption: cardText,
+            parse_mode: 'HTML',
+            ...kb
+          }),
+          1500
+        );
+        return;
+      } catch (err) {
+        // Invalidate stale file_id and continue to fresh upload/URL
+        thumbnailFileIdCache.delete(thumb);
+        thumbnailFileIdCache.delete(course.courseId);
+      }
+    }
+
     // 1. If it's a web URL (http:// or https://)
     if (/^https?:\/\//i.test(thumb)) {
       try {
-        await withFastTimeout(
+        const sentMsg = await withFastTimeout(
           ctx.replyWithPhoto(thumb, {
             caption: cardText,
             parse_mode: 'HTML',
             ...kb
-          })
+          }),
+          1500
         );
+        if (sentMsg && 'photo' in sentMsg && Array.isArray(sentMsg.photo) && sentMsg.photo.length > 0) {
+          const fid = sentMsg.photo[sentMsg.photo.length - 1]?.file_id;
+          if (fid) {
+            thumbnailFileIdCache.set(thumb, fid);
+            thumbnailFileIdCache.set(course.courseId, fid);
+          }
+        }
         return;
       } catch (err: any) {
         console.warn(`⚡ [Fast fallback for ${course.courseId}]: ${err.message}. Sending instant text card.`);
@@ -186,13 +215,21 @@ export async function sendCourseCard(ctx: Context, course: Course, prefixText = 
     // 2. If it's a local file path
     else if (fs.existsSync(thumb)) {
       try {
-        await withFastTimeout(
+        const sentMsg = await withFastTimeout(
           ctx.replyWithPhoto({ source: thumb }, {
             caption: cardText,
             parse_mode: 'HTML',
             ...kb
-          })
+          }),
+          1500
         );
+        if (sentMsg && 'photo' in sentMsg && Array.isArray(sentMsg.photo) && sentMsg.photo.length > 0) {
+          const fid = sentMsg.photo[sentMsg.photo.length - 1]?.file_id;
+          if (fid) {
+            thumbnailFileIdCache.set(thumb, fid);
+            thumbnailFileIdCache.set(course.courseId, fid);
+          }
+        }
         return;
       } catch (err: any) {
         console.warn(`⚡ [Fast fallback for ${course.courseId}]: ${err.message}. Sending instant text card.`);
@@ -337,10 +374,12 @@ export async function handlePhotoUpload(ctx: Context) {
 
   const username = ctx.from.username || '';
   const customerName = [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(' ') || 'Customer';
+  const paymentId = `PAY-${Date.now().toString(36).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
 
   try {
     // 1. Record purchase immediately (Instant in-memory write-through)
     await googleSheetsService.recordPurchaseSubmission({
+      paymentId,
       telegramUserId: String(userId),
       telegramUsername: username,
       customerName,
@@ -359,8 +398,9 @@ export async function handlePhotoUpload(ctx: Context) {
       ...keyboards.mainMenu()
     });
 
-    // 4. Send admin notification in non-blocking background task
-    notifyAdminNewPayment(ctx, {
+    // 4. Send multi-admin notification in non-blocking background task
+    notifyAllAdminsNewPayment(ctx, {
+      paymentId,
       userId: String(userId),
       username,
       customerName,
@@ -377,9 +417,10 @@ export async function handlePhotoUpload(ctx: Context) {
   }
 }
 
-async function notifyAdminNewPayment(
+async function notifyAllAdminsNewPayment(
   ctx: Context,
   data: {
+    paymentId: string;
     userId: string;
     username: string;
     customerName: string;
@@ -389,13 +430,14 @@ async function notifyAdminNewPayment(
     fileId: string;
   }
 ) {
-  const adminId = config.adminTelegramId;
-  if (!adminId) {
-    console.log('ℹ️ [Admin Alert] ADMIN_TELEGRAM_ID not configured in .env. Skipping Telegram message to admin.');
+  const activeAdmins = await googleSheetsService.getActiveApprovalAdmins();
+  if (activeAdmins.length === 0) {
+    console.log('ℹ️ [Admin Alert] No active admins found. Skipping Telegram broadcast.');
     return;
   }
 
   const adminText = messages.adminPaymentNotification({
+    paymentId: data.paymentId,
     telegramUserId: data.userId,
     telegramUsername: data.username,
     customerName: data.customerName,
@@ -404,23 +446,45 @@ async function notifyAdminNewPayment(
     amount: data.amount
   });
 
-  try {
-    await ctx.telegram.sendPhoto(adminId, data.fileId, {
-      caption: adminText,
-      parse_mode: 'HTML',
-      ...keyboards.adminApproval(data.userId, data.courseId)
-    });
-    console.log(`✅ [Admin Alert] Payment notification sent to admin ${adminId}`);
-  } catch (err: any) {
-    console.warn(`⚠️ [Admin Alert] Photo send to admin ${adminId} failed (${err.message}). Trying text message fallback...`);
-    try {
-      await ctx.telegram.sendMessage(adminId, adminText, {
-        parse_mode: 'HTML',
-        ...keyboards.adminApproval(data.userId, data.courseId)
-      });
-    } catch (textErr: any) {
-      console.warn(`⚠️ [Admin Alert] Text send to admin also failed: ${textErr.message}. Make sure Admin ${adminId} has clicked /start on the bot.`);
-    }
+  const notificationRecords: Array<{ adminId: string; chatId: string; messageId: number }> = [];
+
+  // Broadcast to all active admins concurrently in parallel
+  await Promise.allSettled(
+    activeAdmins.map(async (admin) => {
+      try {
+        const sentMsg = await ctx.telegram.sendPhoto(admin.telegramId, data.fileId, {
+          caption: adminText,
+          parse_mode: 'HTML',
+          ...keyboards.adminApproval(data.userId, data.courseId, data.paymentId)
+        });
+        notificationRecords.push({
+          adminId: admin.telegramId,
+          chatId: admin.telegramId,
+          messageId: sentMsg.message_id
+        });
+        console.log(`✅ [Admin Alert] Payment notification sent to admin ${admin.name} (${admin.telegramId})`);
+      } catch (err: any) {
+        console.warn(`⚠️ [Admin Alert] Photo send to admin ${admin.name} (${admin.telegramId}) failed (${err.message}). Trying text message fallback...`);
+        try {
+          const sentMsg = await ctx.telegram.sendMessage(admin.telegramId, adminText, {
+            parse_mode: 'HTML',
+            ...keyboards.adminApproval(data.userId, data.courseId, data.paymentId)
+          });
+          notificationRecords.push({
+            adminId: admin.telegramId,
+            chatId: admin.telegramId,
+            messageId: sentMsg.message_id
+          });
+        } catch (textErr: any) {
+          console.warn(`⚠️ [Admin Alert] Text send to admin ${admin.name} (${admin.telegramId}) also failed: ${textErr.message}. Make sure Admin ${admin.telegramId} has clicked /start on the bot.`);
+        }
+      }
+    })
+  );
+
+  // Store message IDs for synchronization and removal when resolved
+  if (notificationRecords.length > 0) {
+    googleSheetsService.setPurchaseNotificationIds(data.userId, data.courseId, notificationRecords, data.paymentId);
   }
 }
 
@@ -519,7 +583,7 @@ export async function handleSendAllCourseCards(ctx: Context) {
 
       // Safe pause between individual cards to respect Telegram rate limits and avoid flood waits
       if (i < uniqueCourses.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 350));
+        await new Promise(resolve => setTimeout(resolve, 200));
       }
     }
 

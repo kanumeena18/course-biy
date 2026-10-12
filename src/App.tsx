@@ -6,11 +6,15 @@ import { KPICards } from './components/KPICards.js';
 import { TelegramSimulator } from './components/TelegramSimulator.js';
 import { GoogleSheetsViewer } from './components/GoogleSheetsViewer.js';
 import { AddCourseModal } from './components/AddCourseModal.js';
+import { ManageAdmins } from './components/ManageAdmins.js';
+import { AddAdminModal } from './components/AddAdminModal.js';
+import { BeginnerGuide } from './components/BeginnerGuide.js';
 import { Course, Purchase, AdminUser, SettingItem } from './types/index.js';
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<'simulator' | 'sheets'>('simulator');
+  const [activeTab, setActiveTab] = useState<'simulator' | 'sheets' | 'admins' | 'guide'>('simulator');
   const [isAddCourseOpen, setIsAddCourseOpen] = useState(false);
+  const [isAddAdminOpen, setIsAddAdminOpen] = useState(false);
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
   const [isTogglingBot, setIsTogglingBot] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
@@ -160,7 +164,7 @@ export function App() {
   const totalRevenue = paidPurchases.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
 
   return (
-    <div className="min-h-screen bg-[#040515] text-[#D1D5DB] font-sans flex antialiased selection:bg-[#6366F1] selection:text-white">
+    <div className="min-h-screen bg-[#F5F7FA] text-slate-900 font-sans flex antialiased selection:bg-indigo-600 selection:text-white">
       {/* Sidebar Navigation */}
       <Sidebar
         activeTab={activeTab}
@@ -174,7 +178,8 @@ export function App() {
           pendingCount,
           totalCourses: courses.length,
           totalRevenue,
-          paidCount: paidPurchases.length
+          paidCount: paidPurchases.length,
+          adminCount: admins.length
         }}
         onToggleBot={handleToggleBot}
         isToggling={isTogglingBot}
@@ -183,7 +188,7 @@ export function App() {
       />
 
       {/* Main Content Area */}
-      <div className="flex-1 lg:pl-72 flex flex-col min-w-0 min-h-screen bg-[#040515]">
+      <div className="flex-1 lg:pl-72 flex flex-col min-w-0 min-h-screen bg-[#F5F7FA]">
         {/* Top Navbar Header */}
         <Header
           activeTab={activeTab}
@@ -191,6 +196,7 @@ export function App() {
             setEditingCourse(null);
             setIsAddCourseOpen(true);
           }}
+          onOpenAddAdmin={() => setIsAddAdminOpen(true)}
           onRefreshData={loadAllData}
           onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
           config={{
@@ -203,32 +209,41 @@ export function App() {
 
         {/* Dashboard Body */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl w-full mx-auto">
-          {/* Notification Toast */}
+          {/* Notification Toast with Claymorphic Depth */}
           {notification && (
             <div
-              className={`p-4 rounded-xl border flex items-start justify-between shadow-lg transition-all ${
+              className={`p-4 rounded-2xl border flex items-start justify-between shadow-md transition-all animate-in fade-in duration-200 ${
                 notification.type === 'error'
-                  ? 'bg-[#111426] border-[#EF4444]/40 text-[#EF4444]'
+                  ? 'bg-rose-50/90 border-rose-200 text-rose-900 shadow-rose-500/5'
                   : notification.type === 'success'
-                  ? 'bg-[#111426] border-[#22C55E]/40 text-[#22C55E]'
-                  : 'bg-[#111426] border-[#6366F1]/40 text-[#F8FAFC]'
+                  ? 'bg-emerald-50/90 border-emerald-200 text-emerald-900 shadow-emerald-500/5'
+                  : 'bg-indigo-50/90 border-indigo-200 text-indigo-900 shadow-indigo-500/5'
               }`}
+              style={{
+                boxShadow: '0 8px 20px -4px rgba(35, 45, 65, 0.08), inset 0 1px 1px 0 rgba(255, 255, 255, 0.9)'
+              }}
             >
-              <div className="flex items-start space-x-2.5">
+              <div className="flex items-start space-x-3">
                 {notification.type === 'error' ? (
-                  <AlertCircle className="w-5 h-5 text-[#EF4444] shrink-0 mt-0.5" />
+                  <div className="p-1.5 rounded-xl bg-rose-100 text-rose-700 shrink-0 mt-0.5 shadow-2xs">
+                    <AlertCircle className="w-4 h-4" />
+                  </div>
                 ) : notification.type === 'success' ? (
-                  <CheckCircle className="w-5 h-5 text-[#22C55E] shrink-0 mt-0.5" />
+                  <div className="p-1.5 rounded-xl bg-emerald-100 text-emerald-700 shrink-0 mt-0.5 shadow-2xs">
+                    <CheckCircle className="w-4 h-4" />
+                  </div>
                 ) : (
-                  <Info className="w-5 h-5 text-[#6366F1] shrink-0 mt-0.5" />
+                  <div className="p-1.5 rounded-xl bg-indigo-100 text-indigo-700 shrink-0 mt-0.5 shadow-2xs">
+                    <Info className="w-4 h-4" />
+                  </div>
                 )}
-                <div className="text-xs sm:text-sm font-medium leading-relaxed text-[#F8FAFC]">
+                <div className="text-xs sm:text-sm font-semibold leading-relaxed pt-0.5">
                   {notification.message}
                 </div>
               </div>
               <button
                 onClick={() => setNotification(null)}
-                className="p-1 rounded-lg text-[#9CA3AF] hover:text-[#F8FAFC] hover:bg-[#1A1D32] transition ml-2"
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-black/5 transition ml-2"
                 aria-label="Dismiss notification"
               >
                 <X className="w-4 h-4" />
@@ -236,7 +251,7 @@ export function App() {
             </div>
           )}
 
-          {/* Top KPI Metric Cards */}
+          {/* Top KPI Metric Cards (Shown on all dashboard tabs) */}
           <KPICards
             courses={courses}
             purchases={purchases}
@@ -251,6 +266,7 @@ export function App() {
             <TelegramSimulator
               courses={courses}
               purchases={purchases}
+              admins={admins}
               onRefreshData={loadAllData}
               configData={{
                 upiId: statusData.config.upiId,
@@ -283,6 +299,19 @@ export function App() {
               initialTab={pendingCount > 0 ? 'Purchases' : 'Courses'}
             />
           )}
+
+          {activeTab === 'admins' && (
+            <ManageAdmins
+              admins={admins}
+              onRefresh={loadAllData}
+              primaryOwnerTelegramId={statusData.bot.adminId}
+              onShowNotification={showNotification}
+            />
+          )}
+
+          {activeTab === 'guide' && (
+            <BeginnerGuide />
+          )}
         </main>
       </div>
 
@@ -296,6 +325,17 @@ export function App() {
         onCourseAdded={loadAllData}
         courseToEdit={editingCourse}
         onDeleteCourse={handleDeleteCourse}
+      />
+
+      {/* Add New Admin Modal (Global) */}
+      <AddAdminModal
+        isOpen={isAddAdminOpen}
+        onClose={() => setIsAddAdminOpen(false)}
+        onAdminSaved={() => {
+          loadAllData();
+          showNotification('New admin successfully added and synchronized with Google Sheets!', 'success');
+        }}
+        primaryOwnerTelegramId={statusData.bot.adminId}
       />
     </div>
   );

@@ -1,3 +1,4 @@
+import https from 'https';
 import { Telegraf, Context } from 'telegraf';
 import { config } from '../config/config.js';
 import {
@@ -28,7 +29,16 @@ import {
 } from './handlers/adminFlow.js';
 import { googleSheetsService } from '../services/googleSheets.js';
 import { keyboards } from './keyboards/inline.js';
+import { messages } from './messages/templates.js';
 import { systemLogger } from '../services/logger.js';
+
+// High-performance persistent connection agent for Telegram Bot API
+const telegramHttpsAgent = new https.Agent({
+  keepAlive: true,
+  maxSockets: 50,
+  keepAliveMsecs: 15000,
+  timeout: 30000
+});
 
 // Global Process Protections against unhandled crashes
 process.on('unhandledRejection', (reason: any) => {
@@ -44,7 +54,11 @@ export function createBot(token = config.botToken): Telegraf<Context> | null {
     return null;
   }
 
-  const bot = new Telegraf<Context>(token);
+  const bot = new Telegraf<Context>(token, {
+    telegram: {
+      agent: telegramHttpsAgent
+    }
+  });
 
   // 1. Production Performance & Error Boundary Middleware
   bot.use(async (ctx, next) => {
@@ -169,20 +183,20 @@ export function createBot(token = config.botToken): Telegraf<Context> | null {
     await handleGetCourse(ctx, courseId);
   });
 
-  // Admin Approval Action: admin_approve_{userId}_{courseId}
-  bot.action(/^admin_approve_([a-zA-Z0-9_-]+)_([a-zA-Z0-9_-]+)$/, async (ctx) => {
-    ctx.answerCbQuery('Processing approval...').catch(() => {});
+  // Admin Approval Action: admin_approve_{userId}_{courseId}_{paymentId?}
+  bot.action(/^admin_approve_([a-zA-Z0-9_-]+)_([a-zA-Z0-9_-]+)(?:_([a-zA-Z0-9_-]+))?$/, async (ctx) => {
     const userId = ctx.match[1];
     const courseId = ctx.match[2];
-    await handleAdminApprove(ctx, userId, courseId);
+    const paymentId = ctx.match[3];
+    await handleAdminApprove(ctx, userId, courseId, paymentId);
   });
 
-  // Admin Rejection Action: admin_reject_{userId}_{courseId}
-  bot.action(/^admin_reject_([a-zA-Z0-9_-]+)_([a-zA-Z0-9_-]+)$/, async (ctx) => {
-    ctx.answerCbQuery('Processing rejection...').catch(() => {});
+  // Admin Rejection Action: admin_reject_{userId}_{courseId}_{paymentId?}
+  bot.action(/^admin_reject_([a-zA-Z0-9_-]+)_([a-zA-Z0-9_-]+)(?:_([a-zA-Z0-9_-]+))?$/, async (ctx) => {
     const userId = ctx.match[1];
     const courseId = ctx.match[2];
-    await handleAdminReject(ctx, userId, courseId);
+    const paymentId = ctx.match[3];
+    await handleAdminReject(ctx, userId, courseId, paymentId);
   });
 
   // Admin Panel Navigation
@@ -445,4 +459,78 @@ export function getBotStatus() {
     lastError: lastBotError,
     isUnauthorized: Boolean(lastBotError?.includes('401'))
   };
+}
+
+export function getRunningBotInstance(): Telegraf<Context> | null {
+  return runningBotInstance;
+}
+
+export async function syncTelegramAdminDecision(purchase: any, decision: 'Approved' | 'Rejected', winningAdminTag: string) {
+  if (!runningBotInstance) return;
+  const decisionEmoji = decision === 'Approved' ? '✅' : '❌';
+  const decisionText = decision.toUpperCase();
+  const decisionTime = new Date().toLocaleTimeString();
+
+  // Edit and remove buttons from all notified admins
+  if (purchase.adminNotificationMessageIds && Array.isArray(purchase.adminNotificationMessageIds)) {
+    for (const notif of purchase.adminNotificationMessageIds) {
+      const notifText =
+        `🔒 <b>PAYMENT PROCESSED</b>\n\n` +
+        `🎓 <b>Course:</b> ${purchase.courseName}\n` +
+        `👤 <b>Customer ID:</b> <code>${purchase.telegramUserId}</code>\n` +
+        `💰 <b>Amount:</b> ₹${purchase.amount}\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `${decisionEmoji} <b>${decisionText}</b> by ${winningAdminTag} at ${decisionTime}`;
+
+      try {
+        await runningBotInstance.telegram.editMessageCaption(
+          notif.chatId,
+          notif.messageId,
+          undefined,
+          notifText,
+          { parse_mode: 'HTML' }
+        );
+      } catch {
+        try {
+          await runningBotInstance.telegram.editMessageText(
+            notif.chatId,
+            notif.messageId,
+            undefined,
+            notifText,
+            { parse_mode: 'HTML' }
+          );
+        } catch {}
+      }
+    }
+  }
+
+  // Send message to customer if not delivered
+  if (decision === 'Approved') {
+    try {
+      const course = await googleSheetsService.getCourseById(purchase.courseId);
+      if (course) {
+        await runningBotInstance.telegram.sendMessage(
+          purchase.telegramUserId,
+          messages.paymentApprovedCustomerDelivery(course),
+          {
+            parse_mode: 'HTML',
+            ...keyboards.courseDelivery(course.driveLink)
+          }
+        );
+      }
+    } catch (err: any) {
+      console.warn(`⚠️ [Delivery] Could not deliver to customer ${purchase.telegramUserId}: ${err.message}`);
+    }
+  } else if (decision === 'Rejected') {
+    try {
+      const supportUsername = await googleSheetsService.getSetting('SUPPORT_USERNAME', '@kanumeena18');
+      await runningBotInstance.telegram.sendMessage(
+        purchase.telegramUserId,
+        messages.paymentRejectedCustomer(purchase.courseName, supportUsername),
+        { parse_mode: 'HTML' }
+      );
+    } catch (err: any) {
+      console.warn(`⚠️ [Rejection] Could not notify customer ${purchase.telegramUserId}: ${err.message}`);
+    }
+  }
 }

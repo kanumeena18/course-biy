@@ -144,112 +144,118 @@ export const AddCourseModal: React.FC<AddCourseModalProps> = ({
   const isEditing = Boolean(courseToEdit);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#040515]/80 backdrop-blur-xs">
-      <div className="bg-[#111426] border border-[#252A3D] rounded-3xl max-w-xl w-full overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/30 backdrop-blur-xs">
+      <div className="clay-card max-w-xl w-full overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150">
         {/* Modal Header */}
-        <div className="p-5 border-b border-[#252A3D] flex items-center justify-between bg-[#0B0D1F]">
-          <div className="flex items-center space-x-2.5">
-            <span className="p-2 rounded-xl bg-[#1A1D32] text-[#875CE9] border border-[#30354D]">
+        <div className="p-5 sm:p-6 border-b border-slate-100 flex items-center justify-between bg-white">
+          <div className="flex items-center space-x-3">
+            <div 
+              className="p-3 rounded-2xl text-white shadow-sm"
+              style={{
+                background: 'linear-gradient(180deg, #6054F7 0%, #4D3FE8 100%)',
+                boxShadow: '0 6px 16px -2px rgba(77, 63, 232, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.4)'
+              }}
+            >
               {isEditing ? <Sparkles className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
-            </span>
+            </div>
             <div>
-              <h3 className="font-bold text-[#FFFFFF] text-sm sm:text-base">
+              <h3 className="font-extrabold text-slate-900 text-sm sm:text-base tracking-tight">
                 {isEditing ? `Edit Course (${courseToEdit?.courseId})` : 'Add New Course Row'}
               </h3>
-              <p className="text-xs text-[#9CA3AF]">
+              <p className="text-xs text-slate-400 font-medium">
                 {isEditing ? 'Update course details and Image Thumbnail Path.' : 'Inserts a new course row into your Google Sheets database.'}
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-[#9CA3AF] hover:text-[#F8FAFC] rounded-xl hover:bg-[#1A1D32] transition"
+            className="clay-btn-secondary p-1.5"
             aria-label="Close modal"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Modal Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[82vh] overflow-y-auto">
           {error && (
-            <div className="p-3 rounded-xl bg-[#111426] border border-[#EF4444]/40 text-[#EF4444] text-xs">
+            <div className="p-3.5 rounded-2xl bg-rose-50/90 border border-rose-200 text-rose-800 text-xs font-bold shadow-2xs">
               {error}
             </div>
           )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-[#F8FAFC] mb-1">Course Name *</label>
+              <label className="block text-xs font-bold text-slate-800 mb-1.5">Course Name *</label>
               <input
                 type="text"
                 required
                 value={formData.courseName}
                 onChange={e => setFormData({ ...formData, courseName: e.target.value })}
                 placeholder="e.g. Master Video Editing"
-                className="w-full bg-[#0B0D1F] border border-[#252A3D] rounded-xl px-3 py-2 text-xs text-[#D1D5DB] placeholder-[#6B7280] focus:outline-none focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1]"
+                className="w-full clay-input px-3.5 py-2.5 text-xs text-slate-900 placeholder-slate-400 font-medium"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-[#F8FAFC] mb-1">Creator Name *</label>
+              <label className="block text-xs font-bold text-slate-800 mb-1.5">Creator Name *</label>
               <input
                 type="text"
                 required
                 value={formData.creatorName}
                 onChange={e => setFormData({ ...formData, creatorName: e.target.value })}
                 placeholder="e.g. Kabir Khan"
-                className="w-full bg-[#0B0D1F] border border-[#252A3D] rounded-xl px-3 py-2 text-xs text-[#D1D5DB] placeholder-[#6B7280] focus:outline-none focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1]"
+                className="w-full clay-input px-3.5 py-2.5 text-xs text-slate-900 placeholder-slate-400 font-medium"
               />
             </div>
           </div>
 
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="block text-xs font-semibold text-[#F8FAFC] mb-1">Price (₹) *</label>
+              <label className="block text-xs font-bold text-slate-800 mb-1.5">Price (₹) *</label>
               <input
                 type="number"
                 required
                 value={formData.price}
                 onChange={e => setFormData({ ...formData, price: Number(e.target.value) })}
-                className="w-full bg-[#0B0D1F] border border-[#252A3D] rounded-xl px-3 py-2 text-xs text-[#D1D5DB] focus:outline-none focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1]"
+                className="w-full clay-input px-3.5 py-2.5 text-xs text-slate-900 font-mono font-bold"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-[#F8FAFC] mb-1">Original Price (₹)</label>
+              <label className="block text-xs font-bold text-slate-800 mb-1.5">Original Price (₹)</label>
               <input
                 type="number"
                 value={formData.originalPrice}
                 onChange={e => setFormData({ ...formData, originalPrice: Number(e.target.value) })}
-                className="w-full bg-[#0B0D1F] border border-[#252A3D] rounded-xl px-3 py-2 text-xs text-[#D1D5DB] focus:outline-none focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1]"
+                className="w-full clay-input px-3.5 py-2.5 text-xs text-slate-500 font-mono"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-[#F8FAFC] mb-1">Size *</label>
+              <label className="block text-xs font-bold text-slate-800 mb-1.5">Size *</label>
               <input
                 type="text"
                 value={formData.courseSize}
                 onChange={e => setFormData({ ...formData, courseSize: e.target.value })}
                 placeholder="e.g. 3.2 GB"
-                className="w-full bg-[#0B0D1F] border border-[#252A3D] rounded-xl px-3 py-2 text-xs text-[#D1D5DB] placeholder-[#6B7280] focus:outline-none focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1]"
+                className="w-full clay-input px-3.5 py-2.5 text-xs text-slate-900 placeholder-slate-400 font-medium"
               />
             </div>
           </div>
 
           {/* REQUIRED FIELD: Image Thumbnail Path with Live Preview */}
-          <div className="p-4 rounded-2xl bg-[#0B0D1F] border border-[#252A3D] space-y-3">
+          <div className="clay-card-sm p-4 space-y-3">
             <div className="flex items-center justify-between">
               <div>
-                <label className="block text-xs font-bold text-[#FFFFFF]">
+                <label className="block text-xs font-extrabold text-slate-900 tracking-tight">
                   Image Thumbnail Path
                 </label>
-                <p className="text-[11px] text-[#9CA3AF]">
+                <p className="text-[11px] text-slate-400 font-medium">
                   Enter an image URL (https://...) or local path (assets/...) for Telegram course results.
                 </p>
               </div>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#1A1D32] text-[#875CE9] border border-[#30354D]">
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-2xs">
                 Telegram Photo
               </span>
             </div>
@@ -262,12 +268,12 @@ export const AddCourseModal: React.FC<AddCourseModalProps> = ({
                 setImagePreviewError(false);
               }}
               placeholder="https://images.unsplash.com/... or assets/qr-code.png"
-              className="w-full bg-[#111426] border border-[#252A3D] rounded-xl px-3 py-2 text-xs text-[#D1D5DB] placeholder-[#6B7280] focus:outline-none focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1]"
+              className="w-full clay-input px-3.5 py-2 text-xs text-slate-900 placeholder-slate-400 font-medium"
             />
 
             {/* Quick Presets Picker */}
             <div className="flex flex-wrap items-center gap-1.5 pt-1">
-              <span className="text-[10px] font-bold text-[#9CA3AF]">Quick Samples:</span>
+              <span className="text-[10px] font-bold text-slate-400">Quick Samples:</span>
               {PRESET_THUMBNAILS.map(preset => (
                 <button
                   type="button"
@@ -276,7 +282,7 @@ export const AddCourseModal: React.FC<AddCourseModalProps> = ({
                     setFormData({ ...formData, thumbnailUrl: preset.url });
                     setImagePreviewError(false);
                   }}
-                  className="px-2 py-0.5 rounded-lg bg-[#1A1D32] hover:bg-[#252A3D] text-[10px] font-semibold text-[#E5E7EB] hover:text-[#FFFFFF] border border-[#30354D] transition"
+                  className="clay-btn-secondary px-2.5 py-1 text-[10px] font-bold text-slate-700"
                 >
                   {preset.name}
                 </button>
@@ -284,22 +290,22 @@ export const AddCourseModal: React.FC<AddCourseModalProps> = ({
             </div>
 
             {/* Live Thumbnail Preview Box */}
-            <div className="mt-2 p-3 bg-[#040515] border border-[#252A3D] rounded-xl">
-              <div className="text-[11px] font-bold text-[#D1D5DB] mb-2 flex items-center justify-between">
+            <div className="mt-2 clay-inset p-3.5">
+              <div className="text-[11px] font-bold text-slate-700 mb-2 flex items-center justify-between">
                 <span className="flex items-center space-x-1.5">
-                  <ImageIcon className="w-3.5 h-3.5 text-[#6366F1]" />
+                  <ImageIcon className="w-3.5 h-3.5 text-indigo-600" />
                   <span>Admin Panel Thumbnail Preview:</span>
                 </span>
                 {formData.thumbnailUrl ? (
-                  <span className="text-[10px] text-[#22C55E] font-semibold">Ready for Telegram</span>
+                  <span className="text-[10px] text-emerald-700 font-bold">Ready for Telegram</span>
                 ) : (
-                  <span className="text-[10px] text-[#6B7280] italic">No image set (Text-only display)</span>
+                  <span className="text-[10px] text-slate-400 italic font-normal">No image set (Text-only display)</span>
                 )}
               </div>
 
               {formData.thumbnailUrl ? (
                 <div className="flex items-center space-x-3.5">
-                  <div className="w-24 h-16 rounded-lg overflow-hidden border border-[#252A3D] bg-[#0B0D1F] shrink-0 flex items-center justify-center relative">
+                  <div className="w-24 h-16 rounded-xl overflow-hidden border border-slate-200 bg-white shrink-0 flex items-center justify-center relative shadow-xs">
                     {!imagePreviewError ? (
                       <img
                         src={formData.thumbnailUrl}
@@ -308,25 +314,25 @@ export const AddCourseModal: React.FC<AddCourseModalProps> = ({
                         onError={() => setImagePreviewError(true)}
                       />
                     ) : (
-                      <div className="text-center p-1 text-[#6B7280]">
-                        <AlertCircle className="w-5 h-5 mx-auto text-[#F59E0B]" />
-                        <span className="text-[9px] leading-tight block">Local / Unrendered</span>
+                      <div className="text-center p-1 text-slate-400">
+                        <AlertCircle className="w-5 h-5 mx-auto text-amber-500" />
+                        <span className="text-[9px] leading-tight block font-bold">Local / Fallback</span>
                       </div>
                     )}
                   </div>
-                  <div className="text-xs text-[#9CA3AF] space-y-0.5">
-                    <div className="font-semibold text-[#FFFFFF] truncate max-w-[280px]">
+                  <div className="text-xs text-slate-500 space-y-0.5">
+                    <div className="font-bold text-slate-900 truncate max-w-[280px]">
                       {formData.courseName || 'Course Title'}
                     </div>
-                    <div className="text-[11px] text-[#9CA3AF]">
+                    <div className="text-[11px] text-slate-400 font-medium">
                       When searched on Telegram, this image will accompany the course card!
                     </div>
                   </div>
                 </div>
               ) : (
-                <div className="py-2.5 px-3 rounded-lg bg-[#0B0D1F] text-[#6B7280] text-xs flex items-center space-x-2 border border-dashed border-[#252A3D]">
-                  <ImageIcon className="w-4 h-4 text-[#6B7280]" />
-                  <span>No thumbnail configured. The bot will send clean text card without photo.</span>
+                <div className="py-2.5 px-3 rounded-xl bg-white text-slate-400 text-xs flex items-center space-x-2 border border-dashed border-slate-200">
+                  <ImageIcon className="w-4 h-4 text-slate-400" />
+                  <span className="font-medium">No thumbnail configured. The bot will send clean text card without photo.</span>
                 </div>
               )}
             </div>
@@ -334,22 +340,22 @@ export const AddCourseModal: React.FC<AddCourseModalProps> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-[#F8FAFC] mb-1">Language</label>
+              <label className="block text-xs font-bold text-slate-800 mb-1.5">Language</label>
               <input
                 type="text"
                 value={formData.language}
                 onChange={e => setFormData({ ...formData, language: e.target.value })}
                 placeholder="e.g. Hindi, English"
-                className="w-full bg-[#0B0D1F] border border-[#252A3D] rounded-xl px-3 py-2 text-xs text-[#D1D5DB] placeholder-[#6B7280] focus:outline-none focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1]"
+                className="w-full clay-input px-3.5 py-2.5 text-xs text-slate-900 placeholder-slate-400 font-medium"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-[#F8FAFC] mb-1">Visibility Status</label>
+              <label className="block text-xs font-bold text-slate-800 mb-1.5">Visibility Status</label>
               <select
                 value={formData.status}
                 onChange={e => setFormData({ ...formData, status: e.target.value as 'Active' | 'Inactive' })}
-                className="w-full bg-[#0B0D1F] border border-[#252A3D] rounded-xl px-3 py-2 text-xs text-[#D1D5DB] focus:outline-none focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1]"
+                className="w-full clay-input px-3.5 py-2.5 text-xs text-slate-900 font-bold"
               >
                 <option value="Active">Active (Visible to customers)</option>
                 <option value="Inactive">Inactive (Hidden from customers)</option>
@@ -358,53 +364,51 @@ export const AddCourseModal: React.FC<AddCourseModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-[#F8FAFC] mb-1">Google Drive Download Link *</label>
+            <label className="block text-xs font-bold text-slate-800 mb-1.5">Google Drive Download Link *</label>
             <input
               type="url"
               required
               value={formData.driveLink}
               onChange={e => setFormData({ ...formData, driveLink: e.target.value })}
               placeholder="https://drive.google.com/drive/folders/..."
-              className="w-full bg-[#0B0D1F] border border-[#252A3D] rounded-xl px-3 py-2 text-xs text-[#D1D5DB] placeholder-[#6B7280] focus:outline-none focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1]"
+              className="w-full clay-input px-3.5 py-2.5 text-xs text-slate-900 placeholder-slate-400 font-mono font-medium"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-[#F8FAFC] mb-1">Secret ZIP Extraction Password *</label>
+            <label className="block text-xs font-bold text-slate-800 mb-1.5">Secret ZIP Extraction Password *</label>
             <input
               type="text"
               required
               value={formData.zipPassword}
               onChange={e => setFormData({ ...formData, zipPassword: e.target.value })}
               placeholder="e.g. PASS_2026_XYZ"
-              className="w-full bg-[#0B0D1F] border border-[#30354D] rounded-xl px-3 py-2 text-xs text-[#F59E0B] font-mono font-bold focus:outline-none focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1]"
+              className="w-full clay-input px-3.5 py-2.5 text-xs text-indigo-700 font-mono font-bold"
             />
-            <p className="text-[11px] text-[#9CA3AF] mt-1">
+            <p className="text-[11px] text-slate-400 mt-1 font-medium">
               🔒 Delivered only after you approve payment in bank app. Never exposed before payment.
             </p>
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-[#F8FAFC] mb-1">Description</label>
+            <label className="block text-xs font-bold text-slate-800 mb-1.5">Description</label>
             <textarea
               rows={2}
               value={formData.description}
               onChange={e => setFormData({ ...formData, description: e.target.value })}
-              className="w-full bg-[#0B0D1F] border border-[#252A3D] rounded-xl px-3 py-2 text-xs text-[#D1D5DB] placeholder-[#6B7280] focus:outline-none focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1]"
+              className="w-full clay-input px-3.5 py-2.5 text-xs text-slate-900 placeholder-slate-400 font-medium"
             />
           </div>
 
-          <div className="pt-3 flex items-center justify-between border-t border-[#252A3D]">
+          <div className="pt-3 flex items-center justify-between border-t border-slate-100">
             {isEditing && courseToEdit && onDeleteCourse ? (
               <div className="flex items-center space-x-2">
                 <button
                   type="button"
                   disabled={isSubmitting || isDeleting}
                   onClick={handleDelete}
-                  className={`px-3 py-2 text-xs font-semibold rounded-xl transition flex items-center space-x-1.5 ${
-                    confirmDelete
-                      ? 'bg-[#EF4444] text-white animate-pulse'
-                      : 'bg-[#EF4444]/15 hover:bg-[#EF4444]/25 text-[#EF4444] border border-[#EF4444]/30'
+                  className={`clay-btn-danger px-3.5 py-2 text-xs font-bold space-x-1.5 ${
+                    confirmDelete ? 'ring-2 ring-rose-400 animate-pulse' : ''
                   }`}
                   title="Delete course permanently"
                 >
@@ -415,7 +419,7 @@ export const AddCourseModal: React.FC<AddCourseModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setConfirmDelete(false)}
-                    className="text-[11px] text-[#9CA3AF] hover:text-[#F8FAFC] underline"
+                    className="text-[11px] text-slate-400 hover:text-slate-800 font-bold underline"
                   >
                     Cancel
                   </button>
@@ -423,18 +427,18 @@ export const AddCourseModal: React.FC<AddCourseModalProps> = ({
               </div>
             ) : <div />}
 
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-2.5">
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 text-xs font-semibold rounded-xl bg-[#1A1D32] border border-[#30354D] text-[#E5E7EB] hover:bg-[#252A3D] hover:text-[#FFFFFF] transition"
+                className="clay-btn-secondary px-4 py-2 text-xs font-bold"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={isSubmitting || isDeleting}
-                className="px-5 py-2 bg-[#6366F1] hover:bg-[#4F46E5] text-white rounded-xl text-xs font-bold transition shadow-md shadow-[#6366F1]/20 flex items-center space-x-1.5"
+                className="clay-btn-primary px-5 py-2 text-xs font-bold space-x-1.5"
               >
                 <Check className="w-4 h-4" />
                 <span>{isSubmitting ? 'Saving...' : (isEditing ? 'Update Course' : 'Save to Google Sheet')}</span>

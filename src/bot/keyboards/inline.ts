@@ -83,25 +83,22 @@ export const keyboards = {
   },
 
   adminApproval: (identifierOrUserId: string, courseId?: string, paymentId?: string) => {
-    // If paymentId is explicitly provided, or if the first argument is already a payment ID (e.g. starts with PAY-)
-    let resolvedPaymentId = paymentId;
-    if (!resolvedPaymentId) {
-      if (identifierOrUserId && (identifierOrUserId.startsWith('PAY-') || !courseId)) {
-        resolvedPaymentId = identifierOrUserId;
-      }
+    let uid = identifierOrUserId;
+    let cid = courseId || '';
+    let pid = paymentId;
+
+    if (identifierOrUserId && identifierOrUserId.startsWith('PAY-')) {
+      pid = identifierOrUserId;
+      uid = '';
+      cid = '';
     }
 
-    const approveCb = resolvedPaymentId
-      ? `admin_approve_${resolvedPaymentId}`
-      : `admin_approve_${identifierOrUserId}_${courseId}`;
-    const rejectCb = resolvedPaymentId
-      ? `admin_reject_${resolvedPaymentId}`
-      : `admin_reject_${identifierOrUserId}_${courseId}`;
+    const payload = uid && cid ? `${uid}_${cid}_${pid || `PAY-${uid}-${cid}`}` : (pid || uid);
 
     return Markup.inlineKeyboard([
       [
-        Markup.button.callback('✅ APPROVE PAYMENT', approveCb),
-        Markup.button.callback('❌ REJECT PAYMENT', rejectCb)
+        Markup.button.callback('✅ APPROVE PAYMENT', `admin_approve_${payload}`),
+        Markup.button.callback('❌ REJECT PAYMENT', `admin_reject_${payload}`)
       ]
     ]);
   },

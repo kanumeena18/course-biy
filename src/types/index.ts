@@ -31,7 +31,6 @@ export interface Purchase {
   courseId: string;
   courseName: string;
   amount: number;
-  paymentScreenshotFileId: string;
   status: PurchaseStatus;
   createdAt: string;
   submittedAt?: string;

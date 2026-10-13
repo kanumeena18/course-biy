@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot, Sheet, Play, Square, CheckCircle2, AlertCircle, Database, ShieldCheck, TrendingUp, Sparkles, X, Users, BookOpen } from 'lucide-react';
+import { Bot, Sheet, Play, Square, CheckCircle2, AlertCircle, Database, ShieldCheck, TrendingUp, Sparkles, X, Users, BookOpen, QrCode } from 'lucide-react';
 
 interface SidebarProps {
   activeTab: 'simulator' | 'sheets' | 'admins' | 'guide';
@@ -29,6 +29,7 @@ interface SidebarProps {
   isToggling: boolean;
   isOpenMobile: boolean;
   onCloseMobile: () => void;
+  onOpenQrModal?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -40,7 +41,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleBot,
   isToggling,
   isOpenMobile,
-  onCloseMobile
+  onCloseMobile,
+  onOpenQrModal
 }) => {
   const navItems = [
     {
@@ -254,6 +256,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   : 'Simulator Mode'}
               </span>
             </div>
+
+            {onOpenQrModal && (
+              <button
+                type="button"
+                onClick={onOpenQrModal}
+                className="w-full flex items-center justify-between px-1 py-1 rounded-xl hover:bg-slate-200/50 transition cursor-pointer text-left"
+              >
+                <span className="text-slate-500 flex items-center space-x-1.5 text-[11px]">
+                  <QrCode className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Payment QR:</span>
+                </span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border shadow-2xs bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 transition">
+                  View / Edit
+                </span>
+              </button>
+            )}
           </div>
 
           {/* Toggle Live Bot Button with Tactile Clay Style */}

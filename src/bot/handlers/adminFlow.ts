@@ -2,6 +2,7 @@ import { Context } from 'telegraf';
 import { googleSheetsService } from '../../services/googleSheets.js';
 import { messages } from '../messages/templates.js';
 import { keyboards } from '../keyboards/inline.js';
+import { processPaymentAction } from '../../utils/payment.js';
 
 export async function handleAdminApprove(ctx: Context, userId: string, courseId: string, paymentId?: string) {
   if (!ctx.from) return;
@@ -9,14 +10,15 @@ export async function handleAdminApprove(ctx: Context, userId: string, courseId:
   const adminTag = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || `Admin (${adminId})`);
 
   try {
-    // 1. First-Valid-Action-Wins Atomic Decision
-    const result = await googleSheetsService.processPaymentDecision({
+    // 1. First-Valid-Action-Wins Atomic Decision via shared utility
+    const result = await processPaymentAction({
       userId,
       courseId,
       paymentId,
       action: 'APPROVE',
       adminId,
-      adminName: adminTag
+      adminName: adminTag,
+      telegram: ctx.telegram
     });
 
     if (result.alreadyProcessed) {
@@ -55,49 +57,6 @@ export async function handleAdminApprove(ctx: Context, userId: string, courseId:
         await ctx.editMessageText((ctx.callbackQuery?.message as any).text + winningNote, { parse_mode: 'HTML' });
       }
     } catch (e) {}
-
-    // 3. Deliver course access to customer IMMEDIATELY without waiting for admin loops!
-    const course = await googleSheetsService.getCourseById(courseId);
-    if (course) {
-      try {
-        await ctx.telegram.sendMessage(
-          userId,
-          messages.paymentApprovedCustomerDelivery(course),
-          {
-            parse_mode: 'HTML',
-            ...keyboards.courseDelivery(course.driveLink)
-          }
-        );
-        console.log(`✅ [Delivery] Sent course ${course.courseName} to customer ${userId}`);
-      } catch (sendErr: any) {
-        console.warn(`⚠️ [Delivery] Could not deliver directly to customer ${userId}: ${sendErr.message}`);
-      }
-    }
-
-    // 4. Update all other admins' pending notifications CONCURRENTLY in background
-    const notifs = result.purchase?.adminNotificationMessageIds || [];
-    const otherNotifs = notifs.filter(n => String(n.chatId) !== adminId);
-    if (otherNotifs.length > 0) {
-      const notifText =
-        `🔒 <b>PAYMENT PROCESSED</b>\n\n` +
-        `🎓 <b>Course:</b> ${result.purchase?.courseName}\n` +
-        `👤 <b>Customer ID:</b> <code>${result.purchase?.telegramUserId}</code>\n` +
-        `💰 <b>Amount:</b> ₹${result.purchase?.amount}\n\n` +
-        `━━━━━━━━━━━━━━━━━━━━\n` +
-        `✅ <b>APPROVED</b> by ${adminTag} at ${decisionTime}`;
-
-      Promise.allSettled(
-        otherNotifs.map(async (notif) => {
-          try {
-            await ctx.telegram.editMessageCaption(notif.chatId, notif.messageId, undefined, notifText, { parse_mode: 'HTML' });
-          } catch {
-            try {
-              await ctx.telegram.editMessageText(notif.chatId, notif.messageId, undefined, notifText, { parse_mode: 'HTML' });
-            } catch {}
-          }
-        })
-      ).catch(() => {});
-    }
   } catch (error: any) {
     console.error('❌ [Admin Approve Error]:', error.message || error);
     ctx.answerCbQuery('❌ Error processing approval. Please check logs.').catch(() => {});
@@ -110,14 +69,15 @@ export async function handleAdminReject(ctx: Context, userId: string, courseId: 
   const adminTag = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || `Admin (${adminId})`);
 
   try {
-    const result = await googleSheetsService.processPaymentDecision({
+    const result = await processPaymentAction({
       userId,
       courseId,
       paymentId,
       action: 'REJECT',
       adminId,
       adminName: adminTag,
-      rejectionReason: reason || 'Payment screenshot could not be verified'
+      rejectionReason: reason || 'Payment screenshot could not be verified',
+      telegram: ctx.telegram
     });
 
     if (result.alreadyProcessed) {
@@ -231,21 +191,6 @@ export async function handlePendingPaymentsList(ctx: Context) {
         amount: p.amount,
         courseId: p.courseId
       });
-
-      if (p.paymentScreenshotFileId) {
-        try {
-          await ctx.replyWithPhoto(p.paymentScreenshotFileId, {
-            caption: text,
-            parse_mode: 'HTML',
-            ...keyboards.adminApproval(p.telegramUserId, p.courseId, p.paymentId)
-          });
-          // Small pause to prevent Telegram flood limits
-          await new Promise(r => setTimeout(r, 60));
-          continue;
-        } catch (imgErr) {
-          // If photo send fails, text fallback continues below
-        }
-      }
 
       await ctx.reply(text, {
         parse_mode: 'HTML',

@@ -4,14 +4,27 @@ import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { config } from './src/config/config.js';
 import { googleSheetsService } from './src/services/googleSheets.js';
-import { startTelegramBot, stopTelegramBot, getBotStatus, syncTelegramAdminDecision } from './src/bot/bot.js';
+import { startTelegramBot, stopTelegramBot, getBotStatus, syncTelegramAdminDecision, invalidateCachedQrFileId, getRunningBotInstance } from './src/bot/bot.js';
 import { systemLogger } from './src/services/logger.js';
+import { processPaymentAction } from './src/utils/payment.js';
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
-const hasQrAssetCached = fs.existsSync(config.qrImagePath);
 
-app.use(express.json());
+app.use(express.json({ limit: '15mb' }));
+app.use(express.urlencoded({ extended: true, limit: '15mb' }));
+
+// Explicitly serve static assets with no-cache headers to ensure newly uploaded QR images reflect instantly
+const assetsDir = path.resolve(process.cwd(), 'assets');
+if (!fs.existsSync(assetsDir)) {
+  fs.mkdirSync(assetsDir, { recursive: true });
+}
+app.use('/assets', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  next();
+}, express.static(assetsDir));
 
 // Lightweight Performance Monitoring Middleware
 app.use((req, res, next) => {
@@ -26,6 +39,81 @@ app.use((req, res, next) => {
 });
 
 // API Routes
+app.get('/api/payment-qr', (req, res) => {
+  const exists = fs.existsSync(config.qrImagePath);
+  let stats: { size?: number; mtime?: number } = {};
+  if (exists) {
+    try {
+      const s = fs.statSync(config.qrImagePath);
+      stats = { size: s.size, mtime: s.mtimeMs };
+    } catch {}
+  }
+  res.json({
+    success: true,
+    hasQrAsset: exists,
+    qrUrl: `/assets/qr-code.png?v=${stats.mtime || Date.now()}`,
+    upiId: config.upiId,
+    payeeName: config.payeeName,
+    stats
+  });
+});
+
+app.post('/api/payment-qr', (req, res) => {
+  try {
+    const { imageBase64, dataUrl } = req.body || {};
+    const rawData = imageBase64 || dataUrl;
+
+    if (!rawData || typeof rawData !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing imageBase64 or dataUrl in request body.'
+      });
+    }
+
+    const base64Data = rawData.replace(/^data:image\/[a-zA-Z+]+;base64,/, '').trim();
+    const buffer = Buffer.from(base64Data, 'base64');
+
+    if (buffer.length < 50) {
+      return res.status(400).json({
+        success: false,
+        error: 'Uploaded image file is empty or invalid.'
+      });
+    }
+
+    const dir = path.dirname(config.qrImagePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    // Save as primary QR image
+    fs.writeFileSync(config.qrImagePath, buffer);
+
+    // Invalidate cached Telegram Bot file ID so bot re-uploads the new image
+    invalidateCachedQrFileId();
+
+    systemLogger.log({
+      level: 'info',
+      category: 'system',
+      message: 'Default payment QR code updated successfully',
+      details: `Saved new QR image (${buffer.length} bytes) to ${config.qrImagePath}`
+    });
+
+    res.json({
+      success: true,
+      message: 'Default payment QR code updated successfully across website and bot!',
+      size: buffer.length,
+      timestamp: Date.now(),
+      qrUrl: `/assets/qr-code.png?v=${Date.now()}`
+    });
+  } catch (err: any) {
+    console.error('❌ Error updating payment QR:', err);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to save new QR code: ' + err.message
+    });
+  }
+});
+
 app.get('/api/logs', (req, res) => {
   try {
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
@@ -60,7 +148,7 @@ app.get('/api/status', (req, res) => {
       payeeName: config.payeeName,
       supportUsername: config.supportUsername,
       paymentExpiryHours: config.paymentExpiryHours,
-      hasQrAsset: hasQrAssetCached
+      hasQrAsset: fs.existsSync(config.qrImagePath)
     }
   });
 });
@@ -229,7 +317,7 @@ app.get('/api/debug-payment/:paymentId', async (req, res) => {
 
 app.post('/api/simulate-purchase', async (req, res) => {
   try {
-    const { userId, username, customerName, courseId, screenshotUrl } = req.body;
+    const { userId, username, customerName, courseId } = req.body;
     const course = await googleSheetsService.getCourseById(courseId);
     if (!course) {
       return res.status(404).json({ success: false, error: 'Course not found' });
@@ -241,8 +329,7 @@ app.post('/api/simulate-purchase', async (req, res) => {
       customerName: customerName || 'Rahul Verma',
       courseId: course.courseId,
       courseName: course.courseName,
-      amount: course.price,
-      paymentScreenshotFileId: screenshotUrl || 'simulated_screenshot_telegram_file_id'
+      amount: course.price
     });
 
     res.json({ success: true, purchase });
@@ -342,14 +429,16 @@ app.post('/api/admin-action', async (req, res) => {
     }
 
     const resolvedAdminId = String(adminId || config.adminTelegramId || '8293894004');
-    const result = await googleSheetsService.processPaymentDecision({
+    const botInstance = getRunningBotInstance();
+    const result = await processPaymentAction({
       userId: String(userId),
       courseId: String(courseId),
       paymentId: paymentId ? String(paymentId) : undefined,
       action: action === 'APPROVE' ? 'APPROVE' : 'REJECT',
       adminId: resolvedAdminId,
       adminName: adminName || undefined,
-      rejectionReason: rejectionReason || undefined
+      rejectionReason: rejectionReason || undefined,
+      telegram: botInstance ? botInstance.telegram : undefined
     });
 
     if (result.alreadyProcessed) {
@@ -363,15 +452,6 @@ app.post('/api/admin-action', async (req, res) => {
 
     if (!result.success) {
       return res.status(400).json({ success: false, error: result.error || 'Failed to process payment' });
-    }
-
-    // Non-blocking sync to active Telegram bot sessions and customer
-    if (result.purchase) {
-      syncTelegramAdminDecision(
-        result.purchase,
-        action === 'APPROVE' ? 'Approved' : 'Rejected',
-        adminName || `Admin (${resolvedAdminId})`
-      ).catch(() => {});
     }
 
     res.json({ success: true, purchase: result.purchase, delivery: result.delivery });

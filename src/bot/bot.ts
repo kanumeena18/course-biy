@@ -18,7 +18,8 @@ import {
   handlePhotoUpload,
   handleGetCourse,
   handleSendAllCourseCards,
-  sessionManager
+  sessionManager,
+  invalidateCachedQrFileId
 } from './handlers/userFlow.js';
 import {
   handleAdminApprove,
@@ -183,24 +184,24 @@ export function createBot(token = config.botToken): Telegraf<Context> | null {
     await handleGetCourse(ctx, courseId);
   });
 
-  // Admin Approval Action: admin_approve_{userId}_{courseId}_{paymentId?}
+  // Admin Approval Action: admin_approve_{userId}_{courseId}_{paymentId}
   bot.action(/^admin_approve_(.+)$/, async (ctx) => {
     const rawPayload = ctx.match[1];
     const parts = rawPayload.split('_');
     const userId = parts[0];
-    const courseId = parts[1];
-    const paymentId = parts.slice(2).join('_') || undefined;
+    const paymentId = parts[parts.length - 1]?.startsWith('PAY-') ? parts[parts.length - 1] : undefined;
+    const courseId = paymentId ? parts.slice(1, parts.length - 1).join('_') : parts.slice(1).join('_');
     console.log(`🔘 [Telegram Callback] Parsed approve button: userId="${userId}", courseId="${courseId}", paymentId="${paymentId || 'none'}"`);
     await handleAdminApprove(ctx, userId, courseId, paymentId);
   });
 
-  // Admin Rejection Action: admin_reject_{userId}_{courseId}_{paymentId?}
+  // Admin Rejection Action: admin_reject_{userId}_{courseId}_{paymentId}
   bot.action(/^admin_reject_(.+)$/, async (ctx) => {
     const rawPayload = ctx.match[1];
     const parts = rawPayload.split('_');
     const userId = parts[0];
-    const courseId = parts[1];
-    const paymentId = parts.slice(2).join('_') || undefined;
+    const paymentId = parts[parts.length - 1]?.startsWith('PAY-') ? parts[parts.length - 1] : undefined;
+    const courseId = paymentId ? parts.slice(1, parts.length - 1).join('_') : parts.slice(1).join('_');
     console.log(`🔘 [Telegram Callback] Parsed reject button: userId="${userId}", courseId="${courseId}", paymentId="${paymentId || 'none'}"`);
     await handleAdminReject(ctx, userId, courseId, paymentId);
   });
@@ -540,3 +541,6 @@ export async function syncTelegramAdminDecision(purchase: any, decision: 'Approv
     }
   }
 }
+
+export { invalidateCachedQrFileId };
+

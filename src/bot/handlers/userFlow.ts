@@ -1,5 +1,6 @@
 import { Context } from 'telegraf';
 import fs from 'fs';
+import path from 'path';
 import { googleSheetsService } from '../../services/googleSheets.js';
 import { messages } from '../messages/templates.js';
 import { keyboards } from '../keyboards/inline.js';
@@ -145,6 +146,11 @@ export async function handleUserText(ctx: Context) {
 
 let cachedQrFileId: string | null = null;
 const thumbnailFileIdCache = new Map<string, string>();
+
+export function invalidateCachedQrFileId(): void {
+  cachedQrFileId = null;
+  console.log('🔄 [QR Cache] Telegram cached QR file ID cleared.');
+}
 
 function withFastTimeout<T>(promise: Promise<T>, ms = 1500): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -350,6 +356,32 @@ export async function handleIHavePaid(ctx: Context, courseId: string) {
 export async function handlePhotoUpload(ctx: Context) {
   if (!ctx.from || !('photo' in (ctx.message || {}))) return;
   const userId = ctx.from.id;
+
+  // Support Admin directly updating default payment QR code by sending a photo with /setqr or /updateqr
+  const caption = ((ctx.message as any)?.caption || '').trim().toLowerCase();
+  if (caption === '/setqr' || caption === '/updateqr' || caption.startsWith('/setqr ') || caption.startsWith('/updateqr ')) {
+    const isOwner = String(userId) === String(config.adminTelegramId);
+    const isAuthorizedAdmin = isOwner || (await googleSheetsService.isAdmin(userId));
+    if (isAuthorizedAdmin) {
+      try {
+        const photos = (ctx.message as { photo: Array<{ file_id: string }> }).photo;
+        const bestPhoto = photos[photos.length - 1];
+        const fileUrl = await ctx.telegram.getFileLink(bestPhoto.file_id);
+        const res = await fetch(fileUrl.href);
+        const buffer = Buffer.from(await res.arrayBuffer());
+        const dir = path.dirname(config.qrImagePath);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(config.qrImagePath, buffer);
+        invalidateCachedQrFileId();
+        await ctx.reply('✅ <b>Default Payment QR Code Updated!</b>\n\nYour new QR code has been saved and is now live across the bot and website.', { parse_mode: 'HTML' });
+        return;
+      } catch (err: any) {
+        await ctx.reply(`❌ Failed to update QR code: ${err.message}`);
+        return;
+      }
+    }
+  }
+
   const session = sessionManager.getSession(userId);
 
   if (!session || !session.selectedCourseId) {
@@ -385,8 +417,7 @@ export async function handlePhotoUpload(ctx: Context) {
       customerName,
       courseId: course.courseId,
       courseName: course.courseName,
-      amount: course.price,
-      paymentScreenshotFileId: fileId
+      amount: course.price
     });
 
     // 2. Reset user session immediately
@@ -455,20 +486,20 @@ async function notifyAllAdminsNewPayment(
         const sentMsg = await ctx.telegram.sendPhoto(admin.telegramId, data.fileId, {
           caption: adminText,
           parse_mode: 'HTML',
-          ...keyboards.adminApproval(data.paymentId)
+          ...keyboards.adminApproval(data.userId, data.courseId, data.paymentId)
         });
         notificationRecords.push({
           adminId: admin.telegramId,
           chatId: admin.telegramId,
           messageId: sentMsg.message_id
         });
-        console.log(`✅ [Admin Alert] Payment notification sent to admin ${admin.name} (${admin.telegramId}) with ID ${data.paymentId}`);
+        console.log(`✅ [Admin Alert] Payment notification sent to admin ${admin.name} (${admin.telegramId})`);
       } catch (err: any) {
         console.warn(`⚠️ [Admin Alert] Photo send to admin ${admin.name} (${admin.telegramId}) failed (${err.message}). Trying text message fallback...`);
         try {
           const sentMsg = await ctx.telegram.sendMessage(admin.telegramId, adminText, {
             parse_mode: 'HTML',
-            ...keyboards.adminApproval(data.paymentId)
+            ...keyboards.adminApproval(data.userId, data.courseId, data.paymentId)
           });
           notificationRecords.push({
             adminId: admin.telegramId,

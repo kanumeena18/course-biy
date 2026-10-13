@@ -8,14 +8,15 @@ import { GoogleSheetsViewer } from './components/GoogleSheetsViewer.js';
 import { AddCourseModal } from './components/AddCourseModal.js';
 import { ManageAdmins } from './components/ManageAdmins.js';
 import { AddAdminModal } from './components/AddAdminModal.js';
+import { PaymentQrModal } from './components/PaymentQrModal.js';
 import { BeginnerGuide } from './components/BeginnerGuide.js';
 import { Course, Purchase, AdminUser, SettingItem } from './types/index.js';
-import { authFetch } from './services/apiClient.js';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<'simulator' | 'sheets' | 'admins' | 'guide'>('simulator');
   const [isAddCourseOpen, setIsAddCourseOpen] = useState(false);
   const [isAddAdminOpen, setIsAddAdminOpen] = useState(false);
+  const [isQrModalOpen, setIsQrModalOpen] = useState(false);
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
   const [isTogglingBot, setIsTogglingBot] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
@@ -67,8 +68,8 @@ export function App() {
   const loadAllData = async () => {
     try {
       const [statusRes, rawSheetsRes] = await Promise.all([
-        authFetch('/api/status'),
-        authFetch('/api/raw-sheets')
+        fetch('/api/status'),
+        fetch('/api/raw-sheets')
       ]);
 
       if (statusRes.ok) {
@@ -100,7 +101,7 @@ export function App() {
     setIsTogglingBot(true);
     try {
       const action = statusData.bot.isRunning ? 'STOP' : 'START';
-      const res = await authFetch('/api/bot-toggle', {
+      const res = await fetch('/api/bot-toggle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action })
@@ -124,7 +125,7 @@ export function App() {
 
   const handleAdminAction = async (userId: string, courseId: string, action: 'APPROVE' | 'REJECT', paymentId?: string) => {
     try {
-      const res = await authFetch('/api/admin-action', {
+      const res = await fetch('/api/admin-action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId, courseId, action, paymentId })
@@ -134,16 +135,17 @@ export function App() {
         showNotification(`Payment ${action === 'APPROVE' ? 'Approved' : 'Rejected'} successfully!`, 'success');
         await loadAllData();
       } else {
-        showNotification(data.error || 'Could not process payment decision', 'error');
+        showNotification(data.error || 'Failed to process admin action', 'error');
       }
     } catch (err: any) {
+      console.error('Error performing admin action:', err);
       showNotification(`Error: ${err.message}`, 'error');
     }
   };
 
   const handleDeleteCourse = async (courseId: string): Promise<boolean> => {
     try {
-      const res = await authFetch(`/api/courses/${courseId}`, {
+      const res = await fetch(`/api/courses/${courseId}`, {
         method: 'DELETE'
       });
       const data = await res.json();
@@ -188,6 +190,7 @@ export function App() {
         isToggling={isTogglingBot}
         isOpenMobile={isMobileSidebarOpen}
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
+        onOpenQrModal={() => setIsQrModalOpen(true)}
       />
 
       {/* Main Content Area */}
@@ -202,6 +205,7 @@ export function App() {
           onOpenAddAdmin={() => setIsAddAdminOpen(true)}
           onRefreshData={loadAllData}
           onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
+          onOpenQrModal={() => setIsQrModalOpen(true)}
           config={{
             upiId: statusData.config.upiId,
             payeeName: statusData.config.payeeName,
@@ -278,6 +282,7 @@ export function App() {
                 currency: statusData.config.currency,
                 storeName: statusData.config.storeName
               }}
+              onOpenQrModal={() => setIsQrModalOpen(true)}
             />
           )}
 
@@ -339,6 +344,20 @@ export function App() {
           showNotification('New admin successfully added and synchronized with Google Sheets!', 'success');
         }}
         primaryOwnerTelegramId={statusData.bot.adminId}
+      />
+
+      {/* Payment QR Code Modal (Global) */}
+      <PaymentQrModal
+        isOpen={isQrModalOpen}
+        onClose={() => setIsQrModalOpen(false)}
+        upiId={statusData.config.upiId}
+        payeeName={statusData.config.payeeName}
+        storeName={statusData.config.storeName}
+        currency={statusData.config.currency}
+        onQrUpdated={() => {
+          loadAllData();
+          showNotification('Payment QR code updated successfully and active across bot & web!', 'success');
+        }}
       />
     </div>
   );

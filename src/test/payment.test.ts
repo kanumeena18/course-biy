@@ -5,6 +5,10 @@ import { config } from '../config/config.js';
 async function runTests() {
   console.log('🧪 Starting Course Bazar Payment & Approval Workflow Tests...');
 
+  // Reset purchases cache for clean test run
+  (googleSheetsService as any).purchasesCache = [];
+  (googleSheetsService as any).rebuildPurchasesIndex();
+
   // Setup test course
   const testCourseId = 'TEST-C101';
   googleSheetsService.addCourse({
@@ -36,8 +40,7 @@ async function runTests() {
     customerName: testCustomerName,
     courseId: testCourseId,
     courseName: 'Test Masterclass 2026',
-    amount: 199,
-    paymentScreenshotFileId: 'AgACAgUAAxkBAAIC...'
+    amount: 199
   });
 
   assert.strictEqual(purchase.paymentId, paymentId);

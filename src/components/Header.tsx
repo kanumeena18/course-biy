@@ -7,6 +7,7 @@ interface HeaderProps {
   onOpenAddAdmin?: () => void;
   onRefreshData: () => void;
   onOpenMobileSidebar: () => void;
+  onOpenQrModal?: () => void;
   config: {
     upiId: string;
     payeeName: string;
@@ -21,6 +22,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAddAdmin,
   onRefreshData,
   onOpenMobileSidebar,
+  onOpenQrModal,
   config
 }) => {
   const getPageTitle = () => {
@@ -81,12 +83,18 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right: Quick Indicators & Primary Action */}
       <div className="flex items-center space-x-3">
-        {/* UPI Info Pill with Clay Inset */}
-        <div className="hidden md:flex items-center space-x-2 px-3.5 py-2 rounded-2xl bg-[#F8FAFD] border border-slate-200/80 text-xs shadow-2xs">
-          <QrCode className="w-3.5 h-3.5 text-indigo-600" />
+        {/* UPI Info Pill with Clay Inset - Clickable to View & Update QR */}
+        <button
+          type="button"
+          onClick={onOpenQrModal}
+          className="hidden md:flex items-center space-x-2 px-3.5 py-2 rounded-2xl bg-[#F8FAFD] hover:bg-indigo-50/60 border border-slate-200/80 hover:border-indigo-300 text-xs shadow-2xs transition cursor-pointer group"
+          title="Click to view or replace default Payment QR Code"
+        >
+          <QrCode className="w-3.5 h-3.5 text-indigo-600 group-hover:scale-110 transition-transform" />
           <span className="text-slate-400 font-medium">UPI:</span>
           <code className="text-slate-900 font-bold font-mono text-[11px]">{config.upiId}</code>
-        </div>
+          <span className="text-[10px] text-indigo-600 font-bold bg-indigo-50 px-1.5 py-0.5 rounded-full border border-indigo-100">Payment QR</span>
+        </button>
 
         {/* Refresh Button with Tactile Clay Style */}
         <button

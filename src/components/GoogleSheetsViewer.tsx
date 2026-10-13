@@ -19,7 +19,7 @@ interface GoogleSheetsViewerProps {
   onOpenAddCourse: () => void;
   onEditCourse: (course: Course) => void;
   onDeleteCourse: (courseId: string) => Promise<boolean | void> | void;
-  onAdminAction: (userId: string, courseId: string, action: 'APPROVE' | 'REJECT') => void;
+  onAdminAction: (userId: string, courseId: string, action: 'APPROVE' | 'REJECT', paymentId?: string) => void;
   initialTab?: 'Courses' | 'Purchases' | 'Settings' | 'Admins';
 }
 
@@ -631,36 +631,33 @@ export const GoogleSheetsViewer: React.FC<GoogleSheetsViewerProps> = ({
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200 uppercase tracking-wider text-[11px]">
-                  <th className="py-3.5 px-4 font-semibold">Telegram User ID</th>
-                  <th className="py-3.5 px-4 font-semibold">Username</th>
                   <th className="py-3.5 px-4 font-semibold">Customer</th>
+                  <th className="py-3.5 px-4 font-semibold">Telegram ID & Username</th>
                   <th className="py-3.5 px-4 font-semibold">Course</th>
                   <th className="py-3.5 px-4 font-semibold">Amount</th>
-                  <th className="py-3.5 px-4 font-semibold">Payment Proof</th>
                   <th className="py-3.5 px-4 font-semibold">Status</th>
-                  <th className="py-3.5 px-4 font-semibold">Submitted At</th>
-                  <th className="py-3.5 px-4 font-semibold">Approved By</th>
+                  <th className="py-3.5 px-4 font-semibold">Purchase Date</th>
+                  <th className="py-3.5 px-4 font-semibold">Approval Date</th>
+                  <th className="py-3.5 px-4 font-semibold">Approving Admin</th>
                   <th className="py-3.5 px-4 font-semibold text-right">Verification Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
                 {filteredPurchases.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="py-8 text-center text-slate-400">
+                    <td colSpan={9} className="py-8 text-center text-slate-400">
                       No purchase records found
                     </td>
                   </tr>
                 ) : (
                   filteredPurchases.map((p, i) => (
                     <tr key={i} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="py-3.5 px-4 font-mono font-bold text-indigo-600">
-                        {p.telegramUserId}
-                      </td>
-                      <td className="py-3.5 px-4 font-medium text-slate-700">
-                        @{p.telegramUsername || 'anonymous'}
-                      </td>
                       <td className="py-3.5 px-4 font-semibold text-slate-900">
                         {p.customerName}
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <div className="font-mono font-bold text-indigo-600">{p.telegramUserId}</div>
+                        <div className="text-[11px] text-slate-500">@{p.telegramUsername || 'anonymous'}</div>
                       </td>
                       <td className="py-3.5 px-4 text-slate-700">
                         <div className="font-medium text-slate-900">{p.courseName}</div>
@@ -668,11 +665,6 @@ export const GoogleSheetsViewer: React.FC<GoogleSheetsViewerProps> = ({
                       </td>
                       <td className="py-3.5 px-4 font-bold text-emerald-600">
                         ₹{p.amount}
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <span className="text-[11px] text-indigo-600 hover:underline font-medium cursor-pointer" title={p.paymentScreenshotFileId}>
-                          📸 View Screenshot
-                        </span>
                       </td>
                       <td className="py-3.5 px-4">
                         <span
@@ -699,14 +691,14 @@ export const GoogleSheetsViewer: React.FC<GoogleSheetsViewerProps> = ({
                         {p.status === 'PAYMENT_SUBMITTED' ? (
                           <div className="flex items-center justify-end space-x-2">
                             <button
-                              onClick={() => onAdminAction(p.telegramUserId, p.courseId, 'APPROVE')}
+                              onClick={() => onAdminAction(p.telegramUserId, p.courseId, 'APPROVE', p.paymentId)}
                               className="clay-btn-success px-3.5 py-1.5 text-xs font-bold"
                               title="Verify payment and send Google Drive link & ZIP password"
                             >
                               Approve
                             </button>
                             <button
-                              onClick={() => onAdminAction(p.telegramUserId, p.courseId, 'REJECT')}
+                              onClick={() => onAdminAction(p.telegramUserId, p.courseId, 'REJECT', p.paymentId)}
                               className="clay-btn-danger px-3.5 py-1.5 text-xs font-bold"
                               title="Reject submission"
                             >

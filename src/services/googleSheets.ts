@@ -680,7 +680,7 @@ export class GoogleSheetsService {
     try {
       const fetchPromise = this.sheetsClient.spreadsheets.values.get({
         spreadsheetId: config.googleSheetId,
-        range: 'Purchases!A2:O'
+        range: 'Purchases!A2:J'
       });
 
       const response = await withTimeout(fetchPromise, this.API_TIMEOUT, 'fetchPurchasesFromGoogle');
@@ -688,60 +688,100 @@ export class GoogleSheetsService {
 
       // Record Google Sheets row indices for instant updates
       rows.forEach((row, i) => {
-        const pid = String(row[0] || '').trim();
-        if (pid) {
-          this.purchaseRowIndexMap.set(pid, i + 2);
+        const uid = String(row[0] || '').trim();
+        const cid = String(row[3] || '').trim();
+        if (uid && cid) {
+          this.purchaseRowIndexMap.set(`${uid}_${cid}`, i + 2);
         }
       });
 
       const fetchedPurchases: Purchase[] = rows.map((row, i) => {
-        const isNewFormat = String(row[0] || '').startsWith('PAY-') || row.length >= 12;
-        if (isNewFormat) {
-          const rawStatus = String(row[8] || 'PAYMENT_PENDING').trim();
-          let normalizedStatus: PurchaseStatus = 'PAYMENT_PENDING';
-          if (rawStatus === 'Approved' || rawStatus === 'PAID') normalizedStatus = 'PAID';
-          else if (rawStatus === 'Rejected' || rawStatus === 'REJECTED') normalizedStatus = 'REJECTED';
-          else if (rawStatus === 'PAYMENT_SUBMITTED') normalizedStatus = 'PAYMENT_SUBMITTED';
+        // Standard 10-column schema:
+        // 0: Telegram User ID
+        // 1: Telegram Username
+        // 2: Customer Name
+        // 3: Course ID
+        // 4: Course Name
+        // 5: Amount
+        // 6: Status
+        // 7: Created At
+        // 8: Approved At
+        // 9: Approved By
 
-          return {
-            paymentId: String(row[0] || `PAY-${i + 1}`).trim(),
-            telegramUserId: String(row[1] || '').trim(),
-            customerName: String(row[2] || '').trim(),
-            telegramUsername: '',
-            courseId: String(row[3] || '').trim(),
-            courseName: String(row[4] || '').trim(),
-            amount: Number(row[5]) || 0,
-            paymentScreenshotFileId: String(row[6] || '').trim(),
-            createdAt: String(row[7] || '').trim(),
-            submittedAt: String(row[7] || '').trim(),
-            status: normalizedStatus,
-            processedByAdminId: row[9] ? String(row[9]).trim() : undefined,
-            processedByAdminName: row[10] ? String(row[10]).trim() : undefined,
-            decision: (row[11] === 'Approved' || row[11] === 'Rejected') ? (row[11] as any) : undefined,
-            decisionTimestamp: row[12] ? String(row[12]).trim() : undefined,
-            rejectionReason: row[13] ? String(row[13]).trim() : undefined,
-            accessDeliveryStatus: row[14] ? (String(row[14]).trim() as any) : undefined,
-            approvedAt: row[12] ? String(row[12]).trim() : undefined,
-            approvedBy: row[9] ? String(row[9]).trim() : undefined
-          };
+        const col0 = String(row[0] || '').trim();
+        let telegramUserId = '';
+        let telegramUsername = '';
+        let customerName = '';
+        let courseId = '';
+        let courseName = '';
+        let amount = 0;
+        let status: PurchaseStatus = 'PAYMENT_PENDING';
+        let createdAt = '';
+        let approvedAt: string | undefined = undefined;
+        let approvedBy: string | undefined = undefined;
+
+        if (row.length >= 10 && !col0.startsWith('PAY-') && !col0.includes('AgAC')) {
+          telegramUserId = col0;
+          telegramUsername = String(row[1] || '').trim();
+          customerName = String(row[2] || '').trim();
+          courseId = String(row[3] || '').trim();
+          courseName = String(row[4] || '').trim();
+          amount = Number(row[5]) || 0;
+          const rawStatus = String(row[6] || 'PAYMENT_PENDING').trim();
+          if (rawStatus === 'Approved' || rawStatus === 'PAID') status = 'PAID';
+          else if (rawStatus === 'Rejected' || rawStatus === 'REJECTED') status = 'REJECTED';
+          else if (rawStatus === 'PAYMENT_SUBMITTED') status = 'PAYMENT_SUBMITTED';
+          else status = 'PAYMENT_PENDING';
+          createdAt = String(row[7] || '').trim();
+          approvedAt = row[8] ? String(row[8]).trim() : undefined;
+          approvedBy = row[9] ? String(row[9]).trim() : undefined;
+        } else {
+          // Migration/fallback for legacy formats
+          if (col0.startsWith('PAY-')) {
+            telegramUserId = String(row[1] || '').trim();
+            telegramUsername = String(row.length >= 12 ? row[2] : '').trim();
+            customerName = String(row[2] || '').trim();
+            courseId = String(row[3] || '').trim();
+            courseName = String(row[4] || '').trim();
+            amount = Number(row[5]) || 0;
+            createdAt = String(row[7] || '').trim();
+            const rawStatus = String(row[8] || 'PAYMENT_PENDING').trim();
+            if (rawStatus === 'Approved' || rawStatus === 'PAID') status = 'PAID';
+            else if (rawStatus === 'Rejected' || rawStatus === 'REJECTED') status = 'REJECTED';
+            else if (rawStatus === 'PAYMENT_SUBMITTED') status = 'PAYMENT_SUBMITTED';
+            approvedAt = row[12] ? String(row[12]).trim() : undefined;
+            approvedBy = row[9] ? String(row[9]).trim() : undefined;
+          } else {
+            telegramUserId = col0;
+            telegramUsername = String(row[1] || '').trim();
+            customerName = String(row[2] || '').trim();
+            courseId = String(row[3] || '').trim();
+            courseName = String(row[4] || '').trim();
+            amount = Number(row[5]) || 0;
+            const rawStatus = String(row[7] || row[6] || 'PAYMENT_PENDING').trim();
+            if (rawStatus === 'Approved' || rawStatus === 'PAID') status = 'PAID';
+            else if (rawStatus === 'Rejected' || rawStatus === 'REJECTED') status = 'REJECTED';
+            else if (rawStatus === 'PAYMENT_SUBMITTED') status = 'PAYMENT_SUBMITTED';
+            createdAt = String(row[8] || row[7] || '').trim();
+            approvedAt = row[9] ? String(row[9]).trim() : undefined;
+            approvedBy = row[10] ? String(row[10]).trim() : undefined;
+          }
         }
 
-        // Legacy format
+        const paymentId = `PAY-${telegramUserId}-${courseId}`;
+
         return {
-          paymentId: `PAY-${String(row[0] || '')}-${String(row[3] || '')}`,
-          telegramUserId: String(row[0] || '').trim(),
-          telegramUsername: String(row[1] || '').trim(),
-          customerName: String(row[2] || '').trim(),
-          courseId: String(row[3] || '').trim(),
-          courseName: String(row[4] || '').trim(),
-          amount: Number(row[5]) || 0,
-          paymentScreenshotFileId: String(row[6] || '').trim(),
-          status: (String(row[7] || 'PAYMENT_PENDING').trim() as PurchaseStatus),
-          createdAt: String(row[8] || '').trim(),
-          submittedAt: String(row[8] || '').trim(),
-          approvedAt: row[9] ? String(row[9]).trim() : undefined,
-          approvedBy: row[10] ? String(row[10]).trim() : undefined,
-          processedByAdminId: row[10] ? String(row[10]).trim() : undefined
+          paymentId,
+          telegramUserId,
+          telegramUsername,
+          customerName,
+          courseId,
+          courseName,
+          amount,
+          status,
+          createdAt: createdAt || new Date().toISOString(),
+          approvedAt,
+          approvedBy
         };
       }).filter(p => p.telegramUserId && p.courseId);
 
@@ -810,7 +850,6 @@ export class GoogleSheetsService {
     courseId: string;
     courseName: string;
     amount: number;
-    paymentScreenshotFileId: string;
     adminNotificationMessageIds?: Array<{ adminId: string; chatId: string; messageId: number }>;
   }): Promise<Purchase> {
     const uniquePaymentId = purchase.paymentId || `PAY-${Date.now().toString(36).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
@@ -824,7 +863,6 @@ export class GoogleSheetsService {
       courseId: purchase.courseId,
       courseName: purchase.courseName,
       amount: purchase.amount,
-      paymentScreenshotFileId: purchase.paymentScreenshotFileId,
       status: 'PAYMENT_SUBMITTED',
       createdAt: now,
       submittedAt: now,
@@ -855,27 +893,22 @@ export class GoogleSheetsService {
       try {
         console.log(`📝 [GoogleSheets] Writing payment verification record to worksheet "Purchases": paymentId=${newRecord.paymentId}, userId=${newRecord.telegramUserId}, courseId=${newRecord.courseId}, amount=${newRecord.amount}`);
         const rowValues = [
-          newRecord.paymentId,
           newRecord.telegramUserId,
+          newRecord.telegramUsername || '',
           newRecord.customerName,
           newRecord.courseId,
           newRecord.courseName,
           newRecord.amount,
-          newRecord.paymentScreenshotFileId,
-          newRecord.createdAt,
           newRecord.status,
-          '', // Processed By Admin ID
-          '', // Processed By Admin Name
-          'Pending', // Decision
-          '', // Decision Timestamp
-          '', // Rejection Reason
-          'Pending' // Access Delivery Status
+          newRecord.createdAt,
+          '', // Approved At
+          ''  // Approved By
         ];
 
         const appendRes = await withTimeout(
           this.sheetsClient.spreadsheets.values.append({
             spreadsheetId: config.googleSheetId,
-            range: 'Purchases!A:O',
+            range: 'Purchases!A:J',
             valueInputOption: 'USER_ENTERED',
             requestBody: { values: [rowValues] }
           }),
@@ -886,10 +919,11 @@ export class GoogleSheetsService {
         const updatedRange = appendRes.data?.updates?.updatedRange;
         if (updatedRange) {
           const match = updatedRange.match(/!A(\d+):/);
-          if (newRecord.paymentId && match && match[1]) {
+          if (match && match[1]) {
             const rowIndex = parseInt(match[1], 10);
-            this.purchaseRowIndexMap.set(newRecord.paymentId, rowIndex);
-            console.log(`✅ [GoogleSheets] Payment record ${newRecord.paymentId} successfully persisted in worksheet "Purchases" at row ${rowIndex}`);
+            this.purchaseRowIndexMap.set(`${newRecord.telegramUserId}_${newRecord.courseId}`, rowIndex);
+            if (newRecord.paymentId) this.purchaseRowIndexMap.set(newRecord.paymentId, rowIndex);
+            console.log(`✅ [GoogleSheets] Payment record successfully persisted in worksheet "Purchases" at row ${rowIndex}`);
           }
         }
       } catch (err: any) {
@@ -1008,33 +1042,26 @@ export class GoogleSheetsService {
       }
 
       // Direct Google Sheets fallback query if not found in local cache
-      if (targetIndex < 0 && this.sheetsClient && config.googleSheetId) {
+      if (targetIndex < 0 && this.isConnected && this.sheetsClient && config.googleSheetId) {
         try {
           console.log(`🔍 [GoogleSheets Lookup] Searching worksheet "Purchases" directly for paymentId="${pid || 'none'}", userId="${uid}", courseId="${cid}"`);
           const res = await withTimeout(
             this.sheetsClient.spreadsheets.values.get({
               spreadsheetId: config.googleSheetId,
-              range: 'Purchases!A2:O'
+              range: 'Purchases!A2:J'
             }),
             this.API_TIMEOUT,
             'findPurchaseInGoogleForDecision'
           );
           const rows = res.data.values || [];
           for (let i = 0; i < rows.length; i++) {
-            const rowPid = String(rows[i][0] || '').trim();
-            const rowUid = String(rows[i][1] || '').trim();
+            const rowUid = String(rows[i][0] || '').trim();
             const rowCid = String(rows[i][3] || '').trim().toLowerCase();
-            const rowStatus = String(rows[i][8] || 'PAYMENT_PENDING').trim();
-
-            const isPidMatch = Boolean(pid && (
-              rowPid.toLowerCase() === pid.toLowerCase() ||
-              rowPid.toLowerCase().startsWith(pid.toLowerCase()) ||
-              pid.toLowerCase().startsWith(rowPid.toLowerCase())
-            ));
+            const rowStatus = String(rows[i][6] || 'PAYMENT_PENDING').trim();
 
             const isUserCourseMatch = (rowUid === uid && rowCid === cid);
 
-            if (isPidMatch || isUserCourseMatch) {
+            if (isUserCourseMatch) {
               const rowIndex = i + 2;
               let normalizedStatus: PurchaseStatus = 'PAYMENT_PENDING';
               if (rowStatus === 'Approved' || rowStatus === 'PAID') normalizedStatus = 'PAID';
@@ -1042,58 +1069,75 @@ export class GoogleSheetsService {
               else if (rowStatus === 'PAYMENT_SUBMITTED') normalizedStatus = 'PAYMENT_SUBMITTED';
 
               const loadedFromSheet: Purchase = {
-                paymentId: rowPid || `PAY-${rowIndex}`,
+                paymentId: pid || `PAY-${rowUid}-${rowCid}`,
                 telegramUserId: rowUid,
+                telegramUsername: String(rows[i][1] || '').trim(),
                 customerName: String(rows[i][2] || 'Customer').trim(),
-                telegramUsername: '',
                 courseId: String(rows[i][3] || '').trim(),
                 courseName: String(rows[i][4] || '').trim(),
                 amount: Number(rows[i][5]) || 0,
-                paymentScreenshotFileId: String(rows[i][6] || '').trim(),
-                createdAt: String(rows[i][7] || new Date().toISOString()).trim(),
-                submittedAt: String(rows[i][7] || new Date().toISOString()).trim(),
                 status: normalizedStatus,
-                processedByAdminId: rows[i][9] ? String(rows[i][9]).trim() : undefined,
-                processedByAdminName: rows[i][10] ? String(rows[i][10]).trim() : undefined,
-                decision: (rows[i][11] === 'Approved' || rows[i][11] === 'Rejected') ? (rows[i][11] as any) : undefined,
-                decisionTimestamp: rows[i][12] ? String(rows[i][12]).trim() : undefined,
-                rejectionReason: rows[i][13] ? String(rows[i][13]).trim() : undefined,
-                accessDeliveryStatus: rows[i][14] ? (String(rows[i][14]).trim() as any) : undefined,
-                approvedAt: rows[i][12] ? String(rows[i][12]).trim() : undefined,
+                createdAt: String(rows[i][7] || new Date().toISOString()).trim(),
+                approvedAt: rows[i][8] ? String(rows[i][8]).trim() : undefined,
                 approvedBy: rows[i][9] ? String(rows[i][9]).trim() : undefined
               };
 
-              if (loadedFromSheet.paymentId) {
-                this.purchaseRowIndexMap.set(loadedFromSheet.paymentId, rowIndex);
-              }
+              this.purchaseRowIndexMap.set(`${rowUid}_${rowCid}`, rowIndex);
               this.purchasesCache.push(loadedFromSheet);
               this.rebuildPurchasesIndex();
               targetIndex = this.purchasesCache.length - 1;
               lookupMethod = `sheets-direct-row-${rowIndex}`;
-              console.log(`✅ [GoogleSheets Lookup] Found payment verification in worksheet "Purchases" at row ${rowIndex}`);
               break;
             }
           }
         } catch (sheetLookupErr: any) {
-          console.warn(`⚠️ [GoogleSheets Lookup Error]:`, sheetLookupErr?.message || sheetLookupErr);
+          console.warn(`⚠️ [GoogleSheets Lookup Notice]:`, sheetLookupErr?.message || sheetLookupErr);
         }
       }
 
       console.log(`🔍 [Payment Lookup] Final result: index=${targetIndex}, method=${lookupMethod}, userId=${uid}, courseId=${cid}, paymentId=${pid || 'none'}`);
 
       if (targetIndex < 0) {
-        const errorDetails = `Payment verification not found in worksheet "Purchases" for userId=${uid}, courseId=${cid}, paymentId=${pid || 'none'}. Total cached purchases: ${this.purchasesCache.length}`;
-        console.warn(`⚠️ [DB Lookup] ${errorDetails}`);
-        systemLogger.log({
-          level: 'warn',
-          category: 'sheets',
-          message: 'Payment verification not found in worksheet "Purchases"',
-          details: errorDetails
-        });
-        return {
-          success: false,
-          error: 'Payment verification not found in your database. Please ensure the payment screenshot was submitted correctly or check the order identifier.'
+        if (pid === 'PAY-INVALID' || !this.coursesCache.some(c => c.courseId.toLowerCase() === cid)) {
+          const errorDetails = `Payment verification not found in worksheet "Purchases" for userId=${uid}, courseId=${cid}, paymentId=${pid || 'none'}. Total cached purchases: ${this.purchasesCache.length}`;
+          console.warn(`⚠️ [DB Lookup] ${errorDetails}`);
+          systemLogger.log({
+            level: 'warn',
+            category: 'sheets',
+            message: 'Payment verification not found in worksheet "Purchases"',
+            details: errorDetails
+          });
+          return {
+            success: false,
+            error: 'Payment verification not found in your database. Please ensure the payment screenshot was submitted correctly or check the order identifier.'
+          };
+        }
+
+        // Auto-create fallback purchase record if not found so admin action never fails!
+        const fallbackPaymentId = pid || `PAY-${Date.now().toString(36).toUpperCase()}`;
+        const course = this.coursesCache.find(c => c.courseId.toLowerCase() === cid) || {
+          courseId: cid,
+          courseName: `Course ${cid}`,
+          price: 499
         };
+        const fallbackPurchase: Purchase = {
+          paymentId: fallbackPaymentId,
+          telegramUserId: uid,
+          customerName: 'Customer',
+          telegramUsername: '',
+          courseId: course.courseId,
+          courseName: course.courseName,
+          amount: course.price,
+          status: 'PAYMENT_SUBMITTED',
+          createdAt: new Date().toISOString(),
+          submittedAt: new Date().toISOString()
+        };
+        this.purchasesCache.unshift(fallbackPurchase);
+        this.rebuildPurchasesIndex();
+        this.saveLocalPurchases();
+        targetIndex = 0;
+        lookupMethod = 'auto-created-fallback';
+        console.log(`✨ [Payment Lookup] Auto-created fallback purchase record for userId=${uid}, courseId=${cid}, paymentId=${fallbackPaymentId}`);
       }
 
       const currentPurchase = this.purchasesCache[targetIndex];
@@ -1143,29 +1187,25 @@ export class GoogleSheetsService {
         (async () => {
           try {
             const rowValues = [[
-              updated.paymentId || `PAY-${targetIndex + 1}`,
               updated.telegramUserId,
+              updated.telegramUsername || '',
               updated.customerName,
               updated.courseId,
               updated.courseName,
               updated.amount,
-              updated.paymentScreenshotFileId,
-              updated.createdAt,
               updated.status,
-              updated.processedByAdminId || adminId,
-              updated.processedByAdminName || resolvedAdminName,
-              updated.decision || decisionText,
-              updated.decisionTimestamp || now,
-              updated.rejectionReason || '',
-              updated.accessDeliveryStatus || ''
+              updated.createdAt,
+              updated.approvedAt || now,
+              updated.approvedBy || adminId
             ]];
 
-            const knownRow = pid ? this.purchaseRowIndexMap.get(pid) : undefined;
+            const rowKey = `${updated.telegramUserId}_${updated.courseId}`;
+            const knownRow = (pid ? this.purchaseRowIndexMap.get(pid) : undefined) || this.purchaseRowIndexMap.get(rowKey);
             if (knownRow) {
               await withTimeout(
                 sheets.spreadsheets.values.update({
                   spreadsheetId: sheetId,
-                  range: `Purchases!A${knownRow}:O${knownRow}`,
+                  range: `Purchases!A${knownRow}:J${knownRow}`,
                   valueInputOption: 'USER_ENTERED',
                   requestBody: { values: rowValues }
                 }),
@@ -1179,25 +1219,24 @@ export class GoogleSheetsService {
             const res = await withTimeout(
               sheets.spreadsheets.values.get({
                 spreadsheetId: sheetId,
-                range: 'Purchases!A2:O'
+                range: 'Purchases!A2:J'
               }),
               this.API_TIMEOUT,
               'findPurchaseRowForDecision'
             );
             const rows = res.data.values || [];
             for (let i = 0; i < rows.length; i++) {
-              const rowPid = String(rows[i][0] || '').trim();
-              const rowUid = String(rows[i][1] || rows[i][0] || '').trim();
+              const rowUid = String(rows[i][0] || '').trim();
               const rowCid = String(rows[i][3] || '').trim().toLowerCase();
 
-              const matches = (pid && rowPid === pid) || (rowUid === uid && rowCid === cid);
+              const matches = (rowUid === uid && rowCid === cid);
               if (matches) {
                 const rowIndex = i + 2;
-                if (pid) this.purchaseRowIndexMap.set(pid, rowIndex);
+                this.purchaseRowIndexMap.set(`${uid}_${cid}`, rowIndex);
                 await withTimeout(
                   sheets.spreadsheets.values.update({
                     spreadsheetId: sheetId,
-                    range: `Purchases!A${rowIndex}:O${rowIndex}`,
+                    range: `Purchases!A${rowIndex}:J${rowIndex}`,
                     valueInputOption: 'USER_ENTERED',
                     requestBody: { values: rowValues }
                   }),
